@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Guide Glass</string>
+    
+    <!-- API Keys - TODO: Replace with your actual keys -->
+    <string name="google_maps_key">"AIzaSyCX2hNAVdps8OBkfma9zLuIzpGur_iK3zU"</string>
+    <string name="google_directions_key">"AIzaSyAtRgPE48TPymw7hMIQDzSMb9VqqM9cgnc"</string>
+    <string name="gemini_api_key">YOUR_GEMINI_API_KEY</string>
+    
+    <!-- Main Menu -->
+    <string name="vision_mode">Start Vision Mode</string>
+    <string name="navigation_mode">Start Navigation</string>
+    <string name="combined_mode">Vision + Navigation</string>
+    
+    <!-- Maps -->
+    <string name="search_destination">Search destination...</string>
+    <string name="origin_set">Origin set</string>
+    <string name="destination_set">Destination set</string>
+    <string name="start_navigation">Start Navigation</string>
+    <string name="stop_navigation">Stop Navigation</string>
+    <string name="navigation_started">Navigation started</string>
+    <string name="navigation_stopped">Navigation stopped</string>
+    <string name="directions_error">Could not get directions</string>
+    
+    <!-- Vision -->
+    <string name="initializing">Initializing...</string>
+    <string name="camera_ready">Camera ready</string>
+    <string name="camera_error">Camera error</string>
+    <string name="pause_analysis">Pause Analysis</string>
+    <string name="resume_analysis">Resume Analysis</string>
+    <string name="open_maps">Open Maps</string>
+    <string name="point_camera">Point camera forward</string>
+    
+    <!-- Permissions -->
+    <string name="camera_permission_required">Camera permission is required for vision mode</string>
+    <string name="location_permission_required">Location permission is required for navigation</string>
+    
+    <!-- Accessibility -->
+    <string name="search_icon_description">Search</string>
+    <string name="map_type_normal">Normal map view</string>
+    <string name="map_type_satellite">Satellite map view</string>
+    <string name="map_type_terrain">Terrain map view</string>
+    <string name="map_type_hybrid">Hybrid map view</string>
+</resources>

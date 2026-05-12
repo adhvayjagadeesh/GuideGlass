@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base Theme Colors -->
+    <color name="primary">#FF007BFF</color> <!-- Bright Blue -->
+    <color name="primary_dark">#FF005AC1</color> <!-- Darker Blue -->
+    <color name="on_primary">#FFFFFFFF</color> <!-- White -->
+
+    <color name="secondary">#FF3DDC84</color> <!-- Green -->
+    <color name="on_secondary">#FF000000</color> <!-- Black -->
+
+    <color name="tertiary">#FFFFC107</color> <!-- Amber -->
+    <color name="on_tertiary">#FF000000</color> <!-- Black -->
+
+    <color name="background">#FF121212</color> <!-- Dark Background -->
+    <color name="on_background">#FFFFFFFF</color> <!-- White -->
+
+    <color name="surface">#FF1E1E1E</color> <!-- Slightly Lighter Dark -->
+    <color name="on_surface">#FFFFFFFF</color> <!-- White -->
+
+    <color name="error">#FFCF6679</color> <!-- Material Error Red -->
+
+    <!-- Legacy Colors (still needed for compatibility) -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Colors for the detection overlay -->
+    <color name="object_outline">#4CAF50</color> <!-- A nice green -->
+    <color name="object_label_bg">#99000000</color> <!-- Semi-transparent black -->
+</resources>
