@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.impairedvision.guideglass.ai.GeminiManager
+import com.impairedvision.guideglass.ai.NavContextBuilder
+import com.impairedvision.guideglass.maps.NavStateManager
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -45,7 +47,9 @@ data class NavUiState(
     val statusText: String = "Ready",
     val activeUserGoal: String? = null,
     val remainingDistance: Float = 0f,
-    val routeBearing: Float = 0f
+    val routeBearing: Float = 0f,
+    val routeSummary: String = "",
+    val isObstacleInFront: Boolean = false
 )
 
 sealed class NavEvent {
@@ -141,7 +145,8 @@ class NavigationViewModel(
 
         viewModelScope.launch {
             merge(headingFlow, locationFlow, userActionTrigger, tickerFlow).collect {
-                // compareAndSet ensures only one Gemini request runs at a time.
+                // Interruption protection: drop triggers while a Gemini window is active.
+                if (isAnalyzing.get()) return@collect
                 if (isAnalyzing.compareAndSet(false, true)) {
                     triggerGeminiAnalysis()
                 }
@@ -165,7 +170,13 @@ class NavigationViewModel(
                 // Collect the full streamed response before speaking.
                 // GeminiManager emits cumulative chunks; we want only the final complete string.
                 var finalResponse = ""
-                geminiManager.analyzeWithGeminiStream(bitmap, buildNavContext(), _uiState.value.activeUserGoal)
+                val obstacleFlag = NavStateManager.isObstacleInFront
+                geminiManager.analyzeWithGeminiStream(
+                        bitmap,
+                        buildNavContext(),
+                        _uiState.value.activeUserGoal,
+                        obstacleFlag
+                )
                     .collect { cumulativeChunk ->
                         finalResponse = cumulativeChunk
                     }
@@ -203,7 +214,8 @@ class NavigationViewModel(
         viewModelScope.launch {
             val result = routeRepository.getWalkingDirections(originLatLng, destinationLatLng, directionsApiKey)
             if (result != null) {
-                startNavigation(destinationName, destinationLatLng, result.steps, result.polyline)
+                val summary = "${result.distanceText} • ${result.durationText}"
+                startNavigation(destinationName, destinationLatLng, result.steps, result.polyline, summary)
                 _uiState.update { it.copy(statusText = "Ready") }
             } else {
                 _events.send(NavEvent.VibrateError)
@@ -213,7 +225,13 @@ class NavigationViewModel(
         }
     }
 
-    private fun startNavigation(destinationName: String, destinationLatLng: LatLng, steps: List<NavStep>, polyline: List<LatLng>) {
+    private fun startNavigation(
+            destinationName: String,
+            destinationLatLng: LatLng,
+            steps: List<NavStep>,
+            polyline: List<LatLng>,
+            routeSummary: String = ""
+    ) {
         _uiState.update {
             it.copy(
                 navigating = true,
@@ -222,9 +240,11 @@ class NavigationViewModel(
                 navSteps = steps,
                 currentStepIndex = 0,
                 routePolyline = polyline,
+                routeSummary = routeSummary,
                 instructionText = "Starting navigation to $destinationName"
             )
         }
+        NavStateManager.routeSummary = routeSummary
         viewModelScope.launch {
             _events.send(NavEvent.VibrateSuccess)
             _events.send(NavEvent.Speak("Starting navigation to $destinationName"))
@@ -342,69 +362,96 @@ class NavigationViewModel(
 
     private fun buildNavContext(): String {
         val state = _uiState.value
-        if (!state.navigating) return "No active navigation."
+        val isObstacleInFront = NavStateManager.isObstacleInFront
+
+        if (!state.navigating) {
+            return NavContextBuilder.formatNavigationBlock(
+                    navigating = false,
+                    routeBearing = state.routeBearing,
+                    compassBearing = state.compassBearing,
+                    gpsBearing = state.gpsBearing,
+                    hasValidGpsBearing = state.hasValidGpsBearing,
+                    instructionText = state.instructionText,
+                    remainingDistanceText = "n/a",
+                    routeSummary = state.routeSummary,
+                    isObstacleInFront = isObstacleInFront,
+                    travelVerdict = "inactive",
+                    cameraVerdict = "inactive"
+            )
+        }
 
         val instruction = state.instructionText
-        val distance    = "${state.remainingDistance.toInt()} meters"
-        val routeDir    = getBearingDescription(state.routeBearing)
+        val distance = "${state.remainingDistance.toInt()} meters"
+        val routeDir = NavContextBuilder.bearingDescription(state.routeBearing)
 
         val travelBearing = if (state.hasValidGpsBearing) state.gpsBearing else state.compassBearing
-        val travelSource  = if (state.hasValidGpsBearing) "GPS" else "compass — GPS not yet resolved"
-        val travelDir     = getBearingDescription(travelBearing)
-        val travelDelta   = bearingDelta(travelBearing, state.routeBearing)
+        val travelDir = NavContextBuilder.bearingDescription(travelBearing)
+        val travelDelta = NavContextBuilder.bearingDelta(travelBearing, state.routeBearing)
 
-        val rawLevel = when {
-            travelDelta > 120f -> 4   // WRONG WAY
-            travelDelta >  90f -> 3   // HEADING AWAY
-            travelDelta >  45f -> 2   // OFF ROUTE
-            travelDelta >  20f -> 1   // SLIGHTLY OFF
-            else               -> 0   // ON TRACK
-        }
-        
+        val rawLevel =
+                when {
+                    travelDelta > 120f -> 4
+                    travelDelta > 90f -> 3
+                    travelDelta > 45f -> 2
+                    travelDelta > 20f -> 1
+                    else -> 0
+                }
+
         val now = System.currentTimeMillis()
-        val displayLevel = if (rawLevel > committedVerdictLevel) {
-            if (rawLevel != pendingVerdictLevel) {
-                pendingVerdictLevel = rawLevel
-                pendingVerdictSince = now
-            }
-            if (now - pendingVerdictSince >= 2000L) { // VERDICT_HYSTERESIS_MS
-                committedVerdictLevel = rawLevel
-                rawLevel
-            } else {
-                committedVerdictLevel
-            }
-        } else {
-            committedVerdictLevel = rawLevel
-            pendingVerdictLevel   = rawLevel
-            pendingVerdictSince   = now
-            rawLevel
-        }
+        val displayLevel =
+                if (rawLevel > committedVerdictLevel) {
+                    if (rawLevel != pendingVerdictLevel) {
+                        pendingVerdictLevel = rawLevel
+                        pendingVerdictSince = now
+                    }
+                    if (now - pendingVerdictSince >= 2000L) {
+                        committedVerdictLevel = rawLevel
+                        rawLevel
+                    } else {
+                        committedVerdictLevel
+                    }
+                } else {
+                    committedVerdictLevel = rawLevel
+                    pendingVerdictLevel = rawLevel
+                    pendingVerdictSince = now
+                    rawLevel
+                }
 
-        val travelVerdict = when (displayLevel) {
-            4    -> "⚠ WRONG WAY — heading $travelDir, nearly opposite to route (${travelDelta.toInt()}° off). Turn around."
-            3    -> "⚠ HEADING AWAY — travelling $travelDir (${travelDelta.toInt()}° off-route). Turn toward $routeDir."
-            2    -> "OFF ROUTE — heading $travelDir (${travelDelta.toInt()}° off). Bear toward $routeDir."
-            1    -> "SLIGHTLY OFF — heading $travelDir (${travelDelta.toInt()}° off-route)."
-            else -> "ON TRACK — heading $travelDir."
-        }
+        val travelVerdict =
+                when (displayLevel) {
+                    4 ->
+                            "⚠ WRONG WAY — heading $travelDir, nearly opposite to route (${travelDelta.toInt()}° off). Turn around."
+                    3 ->
+                            "⚠ HEADING AWAY — travelling $travelDir (${travelDelta.toInt()}° off-route). Turn toward $routeDir."
+                    2 -> "OFF ROUTE — heading $travelDir (${travelDelta.toInt()}° off). Bear toward $routeDir."
+                    1 -> "SLIGHTLY OFF — heading $travelDir (${travelDelta.toInt()}° off-route)."
+                    else -> "ON TRACK — heading $travelDir."
+                }
 
-        val facingDelta   = bearingDelta(state.compassBearing, state.routeBearing)
-        val cameraDir     = getBearingDescription(state.compassBearing)
-        val cameraVerdict = when {
-            facingDelta > 90f ->
-                "MISALIGNED — camera facing $cameraDir (${facingDelta.toInt()}\u00b0 off route)."
-            facingDelta > 30f ->
-                "SLIGHTLY OFF — camera facing $cameraDir (${facingDelta.toInt()}\u00b0 off route)."
-            else ->
-                "ALIGNED — camera facing $cameraDir."
-        }
+        val facingDelta = NavContextBuilder.bearingDelta(state.compassBearing, state.routeBearing)
+        val cameraDir = NavContextBuilder.bearingDescription(state.compassBearing)
+        val cameraVerdict =
+                when {
+                    facingDelta > 90f ->
+                            "MISALIGNED — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
+                    facingDelta > 30f ->
+                            "SLIGHTLY OFF — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
+                    else -> "ALIGNED — camera facing $cameraDir."
+                }
 
-        return buildString {
-            appendLine("ROUTE: Go $routeDir.")
-            appendLine("TRAVEL STATUS ($travelSource): $travelVerdict")
-            appendLine("CAMERA STATUS: $cameraVerdict")
-            appendLine("NEXT STEP: \"$instruction\" in $distance.")
-        }
+        return NavContextBuilder.formatNavigationBlock(
+                navigating = true,
+                routeBearing = state.routeBearing,
+                compassBearing = state.compassBearing,
+                gpsBearing = state.gpsBearing,
+                hasValidGpsBearing = state.hasValidGpsBearing,
+                instructionText = instruction,
+                remainingDistanceText = distance,
+                routeSummary = state.routeSummary.ifBlank { NavStateManager.routeSummary },
+                isObstacleInFront = isObstacleInFront,
+                travelVerdict = travelVerdict,
+                cameraVerdict = cameraVerdict
+        )
     }
 }
 

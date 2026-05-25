@@ -2,10 +2,10 @@
 <resources>
     <string name="app_name">Guide Glass</string>
     
-    <!-- API Keys - TODO: Replace with your actual keys -->
-    <string name="google_maps_key">"AIzaSyCX2hNAVdps8OBkfma9zLuIzpGur_iK3zU"</string>
-    <string name="google_directions_key">"AIzaSyAtRgPE48TPymw7hMIQDzSMb9VqqM9cgnc"</string>
-    <string name="gemini_api_key">YOUR_GEMINI_API_KEY</string>
+    <!-- API keys are injected at build time from local.properties (see local.properties.example) -->
+    <string name="google_maps_key" translatable="false">MISSING_GOOGLE_MAPS_KEY</string>
+    <string name="google_directions_key" translatable="false">MISSING_GOOGLE_DIRECTIONS_KEY</string>
+    <string name="gemini_api_key" translatable="false">MISSING_GEMINI_API_KEY</string>
     
     <!-- Main Menu -->
     <string name="vision_mode">Start Vision Mode</string>

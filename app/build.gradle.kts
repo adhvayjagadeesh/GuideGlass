@@ -1,7 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { localProperties.load(it) }
+}
+
+fun localProp(key: String): String = localProperties.getProperty(key)?.trim()?.trim('"') ?: ""
 
 android {
     namespace = "com.impairedvision.guideglass"
@@ -13,6 +23,22 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        val geminiApiKey = localProp("GEMINI_API_KEY")
+        val googleMapsKey = localProp("GOOGLE_MAPS_KEY")
+        val googleDirectionsKey = localProp("GOOGLE_DIRECTIONS_KEY")
+
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "GOOGLE_MAPS_KEY", "\"$googleMapsKey\"")
+        buildConfigField("String", "GOOGLE_DIRECTIONS_KEY", "\"$googleDirectionsKey\"")
+
+        resValue("string", "google_maps_key", googleMapsKey.ifEmpty { "MISSING_GOOGLE_MAPS_KEY" })
+        resValue(
+                "string",
+                "google_directions_key",
+                googleDirectionsKey.ifEmpty { "MISSING_GOOGLE_DIRECTIONS_KEY" }
+        )
+        resValue("string", "gemini_api_key", geminiApiKey.ifEmpty { "MISSING_GEMINI_API_KEY" })
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -58,6 +84,7 @@ android {
         compose = true
         viewBinding = true
         mlModelBinding = true
+        buildConfig = true
     }
 
     composeOptions {

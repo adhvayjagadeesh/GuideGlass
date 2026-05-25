@@ -25,9 +25,6 @@ import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import com.google.ai.client.generativeai.type.generationConfig
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -44,20 +41,23 @@ import com.google.android.libraries.places.widget.Autocomplete
 import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
 import com.google.android.material.snackbar.Snackbar
 import com.impairedvision.guideglass.R
+import com.impairedvision.guideglass.util.GeocoderHelper
+import com.impairedvision.guideglass.util.VibrationHelper
 import com.impairedvision.guideglass.maps.Leg
 import com.impairedvision.guideglass.maps.NavStateManager
 import com.impairedvision.guideglass.maps.PolylineDecoder
 import com.impairedvision.guideglass.maps.RetrofitClients
 import com.impairedvision.guideglass.tts.SpeechHelper
+import com.impairedvision.guideglass.ai.GeminiManager
+import com.impairedvision.guideglass.ai.NavContextBuilder
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
 
 class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
 
     companion object {
-        private const val API_KEY = "AIzaSyB6w379NsNIvbLnMqRf-x3DSZegIyYiZPw"
-        private const val MODEL_NAME = "gemini-3.1-flash-lite-preview"
         private const val TAG = "VisionActivity"
         private const val THROTTLE_MS = 1500L
         private const val CAMERA_PERMISSION_CODE = 10
@@ -104,15 +104,14 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
                 Thread(r, "reflex-thread").apply { priority = Thread.MAX_PRIORITY }
             }
     private val uiScope = CoroutineScope(Job() + Dispatchers.Main)
-    private lateinit var visionCoordinator: VisionCoordinator
+    private val obstacleDetector = ObstacleDetector()
 
     // ===== VISION STATE =====
     private var lastAnalysisTime = 0L
-    private var isProcessing = false
     private var analysisEnabled = true
     private var combinedMode = false
-    private var lastReflexTime = 0L
-    private val REFLEX_THROTTLE_MS = 1000L
+    /** Single gate for Tier-2 Gemini work (replaces legacy isProcessing + geminiInFlight). */
+    private val geminiInFlight = AtomicBoolean(false)
     @Volatile private var reflexFiredThisCycle = false
 
     // ===== ROUTE BEARING STATE =====
@@ -138,7 +137,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     private var gpsBearing: Float = 0f
 
     // ===== GEMINI =====
-    private val geminiManager = GeminiManager()
+    private lateinit var geminiManager: GeminiManager
 
     // ===== PERMISSION LAUNCHERS =====
     private val locationPermissionLauncher =
@@ -256,7 +255,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
 
         combinedMode = intent.getBooleanExtra("COMBINED_MODE", false)
         speechHelper = SpeechHelper(this)
-        visionCoordinator = VisionCoordinator(this)
+        geminiManager = GeminiManager(getString(R.string.gemini_api_key))
 
         // ----- Vision-only UI (always in layout) -----
         previewView = findViewById(R.id.previewView)
@@ -310,7 +309,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
             setupCombinedMode()
         }
 
-        checkCameraPermissionAndStart()
+        scheduleCameraStart()
 
         val welcomeMsg =
                 if (combinedMode) {
@@ -318,7 +317,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
                 } else {
                     "Vision mode started. Point camera forward."
                 }
-        speechHelper.speak(welcomeMsg)
+        previewView.post { speechHelper.speak(welcomeMsg) }
 
         previewView.setOnLongClickListener {
             startVoiceCommand()
@@ -345,10 +344,6 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
             locationPermissionLauncher.launch(arrayOf(fine, coarse))
         }
 
-        if (!Places.isInitialized()) {
-            Places.initialize(applicationContext, getString(R.string.google_maps_key))
-        }
-
         combinedContainer =
                 findViewById<View>(R.id.combined_container).also { it.visibility = View.VISIBLE }
 
@@ -362,7 +357,20 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         val mapFragment =
                 supportFragmentManager.findFragmentById(R.id.combined_map_fragment) as?
                         SupportMapFragment
-        mapFragment?.getMapAsync(this)
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            if (!Places.isInitialized()) {
+                Places.initialize(applicationContext, getString(R.string.google_maps_key))
+            }
+            withContext(Dispatchers.Main) { mapFragment?.getMapAsync(this@VisionActivity) }
+        }
+    }
+
+    /** Defer camera bind until PreviewView has been laid out (fixes combined-mode startup hang). */
+    private fun scheduleCameraStart() {
+        val previewHost =
+                if (combinedMode) previewViewCombined ?: previewView else previewView
+        previewHost.post { checkCameraPermissionAndStart() }
     }
 
     // ========================================
@@ -467,6 +475,8 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         navPanel?.visibility = View.GONE
         navSteps = emptyList()
         currentStepIndex = 0
+        NavStateManager.routeSummary = ""
+        NavStateManager.isObstacleInFront = false
 
         lastKnownLocation?.let { loc ->
             googleMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(loc, 14f))
@@ -558,7 +568,9 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     )
 
     private fun showNavigationPanel(leg: Leg) {
-        navSummary?.text = "Distance: ${leg.distance.text} • Duration: ${leg.duration.text}"
+        val summary = "${leg.distance.text} • ${leg.duration.text}"
+        NavStateManager.routeSummary = summary
+        navSummary?.text = "Distance: $summary"
         speechHelper.speak("Route found. ${leg.distance.text}, about ${leg.duration.text}")
 
         navSteps =
@@ -888,19 +900,13 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         analysisEnabled = false
-        isProcessing = false
+        geminiInFlight.set(false)
         speechHelper.stop()
 
         try {
             val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 100)
             toneGen.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 150)
-            val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
-            vibrator.vibrate(
-                    android.os.VibrationEffect.createOneShot(
-                            100,
-                            android.os.VibrationEffect.DEFAULT_AMPLITUDE
-                    )
-            )
+            VibrationHelper.vibrateOneShot(this, 100L)
         } catch (e: Exception) {
             Log.e(TAG, "Feedback error", e)
         }
@@ -1093,10 +1099,9 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun geocodeAndSetDestination(query: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                val geocoder = android.location.Geocoder(this@VisionActivity)
-                val addresses = geocoder.getFromLocationName(query, 1)
+                val addresses = GeocoderHelper.getAddressesFromLocationName(this@VisionActivity, query, 1)
                 if (addresses?.isNotEmpty() == true) {
                     val location = addresses[0]
                     val destination = LatLng(location.latitude, location.longitude)
@@ -1198,78 +1203,52 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun processFrame(bitmap: Bitmap, currentTime: Long) {
         reflexFiredThisCycle = false
 
-        // Step 1: MiDaS depth estimation
-        val depthMap = visionCoordinator.estimateDepth(bitmap)
+        obstacleDetector.processFrame(
+                bitmap,
+                object : ObstacleDetector.Listener {
+                    override fun onObstacleEntered() {
+                        NavStateManager.isObstacleInFront = true
+                        reflexFiredThisCycle = true
+                        runOnUiThread { fireReflexStopAlert() }
+                        maybeLaunchGemini(bitmap, currentTime, bypassThrottle = true)
+                    }
 
-        // Step 2: Pure depth-map STOP trigger
-        if (depthMap != null && currentTime - lastReflexTime >= REFLEX_THROTTLE_MS) {
-            val mapW = depthMap.width
-            val mapH = depthMap.height
-
-            val sceneAverage = depthMap.values.average().toFloat()
-
-            // Center 30% horizontal, middle third vertical — avoids floor false-triggers on phone
-            // tilt
-            val centerStartX = mapW * 35 / 100
-            val centerEndX = mapW * 65 / 100
-            val centerStartY = mapH / 3
-            val centerEndY = mapH * 2 / 3
-
-            // Adaptive threshold clamped to [0.10, 0.25] for consistency across environments
-            val threshold = (sceneAverage * 0.35f).coerceIn(0.10f, 0.25f)
-            var closePixels = 0
-            var totalCenterPixels = 0
-
-            for (y in centerStartY until centerEndY) {
-                for (x in centerStartX until centerEndX) {
-                    val idx = y * mapW + x
-                    if (idx < depthMap.values.size) {
-                        totalCenterPixels++
-                        if (depthMap.values[idx] < threshold) {
-                            closePixels++
-                        }
+                    override fun onObstacleCleared() {
+                        NavStateManager.isObstacleInFront = false
                     }
                 }
-            }
+        )
 
-            if (totalCenterPixels > 0) {
-                val closePercentage = closePixels.toFloat() / totalCenterPixels
-                if (closePercentage > 0.20f) {
-                    reflexFiredThisCycle = true
-                    lastReflexTime = currentTime
-                    runOnUiThread {
-                        speechHelper.speakUrgent("STOP. Obstacle ahead.")
-                        updateStatusText("DEPTH ALERT: ${(closePercentage * 100).toInt()}% blocked")
-                        val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
-                        vibrator.vibrate(
-                                android.os.VibrationEffect.createOneShot(
-                                        200,
-                                        android.os.VibrationEffect.DEFAULT_AMPLITUDE
-                                )
-                        )
-                    }
-                }
-            }
-        }
+        maybeLaunchGemini(bitmap, currentTime, bypassThrottle = false)
+    }
 
-        // --- TIER 2: CLOUD REASONING (Gemini) - directional guidance only ---
+    private fun fireReflexStopAlert() {
+        speechHelper.speakUrgent("STOP. Obstacle ahead.")
+        updateStatusText("OBSTACLE ALERT")
+        VibrationHelper.vibrateOneShot(this, 200L)
+    }
+
+    /**
+     * Tier 2 Gemini — gated so in-flight reasoning cannot be interrupted by frame triggers.
+     */
+    private fun maybeLaunchGemini(bitmap: Bitmap, currentTime: Long, bypassThrottle: Boolean) {
+        if (!analysisEnabled || geminiInFlight.get()) return
+
         val dynamicThrottle = if (isMoving || activeUserGoal != null) THROTTLE_MS else 3000L
-        val needsGemini =
-                analysisEnabled &&
-                        currentTime - lastAnalysisTime >= dynamicThrottle &&
-                        !isProcessing
+        if (!bypassThrottle && currentTime - lastAnalysisTime < dynamicThrottle) return
+        if (!geminiInFlight.compareAndSet(false, true)) return
 
-        if (needsGemini) {
-            lastAnalysisTime = currentTime
-            isProcessing = true
-            runOnUiThread {
-                updateStatusText(if (activeUserGoal != null) "Thinking..." else "Analyzing...")
-            }
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    analyzeWithGemini(bitmap)
-                } finally {
-                    isProcessing = false
+        lastAnalysisTime = currentTime
+        runOnUiThread {
+            updateStatusText(if (activeUserGoal != null) "Thinking..." else "Analyzing...")
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                analyzeWithGemini(bitmap)
+            } finally {
+                geminiInFlight.set(false)
+                runOnUiThread {
+                    updateStatusText(if (analysisEnabled) "Active" else "Paused")
                 }
             }
         }
@@ -1280,16 +1259,16 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
             val navCtx = buildNavContext()
             val userGoal = activeUserGoal
 
-            geminiManager.analyzeWithGeminiStream(originalBitmap, navCtx, userGoal)
-                .collect { responseText ->
-                    handleGeminiFinalResponse(responseText)
-                }
+            geminiManager.analyzeWithGeminiStream(
+                            originalBitmap,
+                            navCtx,
+                            userGoal,
+                            NavStateManager.isObstacleInFront
+                    )
+                    .collect { responseText -> handleGeminiFinalResponse(responseText) }
         } catch (e: Exception) {
             Log.e(TAG, "Gemini API Error: ${e.message}")
             runOnUiThread { updateStatusText("Analysis error") }
-        } finally {
-            isProcessing = false
-            runOnUiThread { updateStatusText(if (analysisEnabled) "Active" else "Paused") }
         }
     }
 
@@ -1309,10 +1288,11 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
 
             if (resultText.contains("[DONE]", ignoreCase = true)) {
                 activeUserGoal = null
-                val vibrator = getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
-                val timings = longArrayOf(0, 120, 80, 120)
-                val amplitudes = intArrayOf(0, 200, 0, 200)
-                vibrator.vibrate(android.os.VibrationEffect.createWaveform(timings, amplitudes, -1))
+                VibrationHelper.vibrateWaveform(
+                        this,
+                        longArrayOf(0, 120, 80, 120),
+                        intArrayOf(0, 200, 0, 200)
+                )
                 Log.d(TAG, "Task completed and goal cleared automatically.")
             }
         }
@@ -1375,38 +1355,66 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun buildNavContext(): String {
-        if (!navigating) return "No active navigation."
+        if (!navigating) {
+            return NavContextBuilder.formatNavigationBlock(
+                    navigating = false,
+                    routeBearing = routeBearing,
+                    compassBearing = compassBearing,
+                    gpsBearing = gpsBearing,
+                    hasValidGpsBearing = hasValidGpsBearing,
+                    instructionText = NavStateManager.currentInstruction,
+                    remainingDistanceText = NavStateManager.remainingDistance,
+                    routeSummary = NavStateManager.routeSummary,
+                    isObstacleInFront = NavStateManager.isObstacleInFront,
+                    travelVerdict = "inactive",
+                    cameraVerdict = "inactive"
+            )
+        }
 
-        val routeDir = getBearingDescription(routeBearing)
+        val routeDir = NavContextBuilder.bearingDescription(routeBearing)
         val instruction = NavStateManager.currentInstruction
         val distance = NavStateManager.remainingDistance
 
-        // 1. TRAVEL STATUS (GPS vs Route)
         val travelBearing = if (hasValidGpsBearing) gpsBearing else compassBearing
-        val travelDelta = bearingDelta(travelBearing, routeBearing)
-        val travelVerdict = when {
-            travelDelta > 120f -> "⚠ WRONG WAY — heading ${getBearingDescription(travelBearing)} (${travelDelta.toInt()}° off). Turn around."
-            travelDelta > 90f  -> "⚠ HEADING AWAY — travelling ${getBearingDescription(travelBearing)} (${travelDelta.toInt()}° off-route). Turn toward $routeDir."
-            travelDelta > 45f  -> "OFF ROUTE — heading ${getBearingDescription(travelBearing)} (${travelDelta.toInt()}° off). Bear toward $routeDir."
-            travelDelta > 20f  -> "SLIGHTLY OFF — heading ${getBearingDescription(travelBearing)} (${travelDelta.toInt()}° off-route)."
-            else               -> "ON TRACK — heading ${getBearingDescription(travelBearing)}."
-        }
+        val travelDelta = NavContextBuilder.bearingDelta(travelBearing, routeBearing)
+        val travelVerdict =
+                when {
+                    travelDelta > 120f ->
+                            "⚠ WRONG WAY — heading ${NavContextBuilder.bearingDescription(travelBearing)} (${travelDelta.toInt()}° off). Turn around."
+                    travelDelta > 90f ->
+                            "⚠ HEADING AWAY — travelling ${NavContextBuilder.bearingDescription(travelBearing)} (${travelDelta.toInt()}° off-route). Turn toward $routeDir."
+                    travelDelta > 45f ->
+                            "OFF ROUTE — heading ${NavContextBuilder.bearingDescription(travelBearing)} (${travelDelta.toInt()}° off). Bear toward $routeDir."
+                    travelDelta > 20f ->
+                            "SLIGHTLY OFF — heading ${NavContextBuilder.bearingDescription(travelBearing)} (${travelDelta.toInt()}° off-route)."
+                    else ->
+                            "ON TRACK — heading ${NavContextBuilder.bearingDescription(travelBearing)}."
+                }
 
-        // 2. CAMERA STATUS (Compass vs Route)
-        val facingDelta = bearingDelta(compassBearing, routeBearing)
-        val cameraDir = getBearingDescription(compassBearing)
-        val cameraVerdict = when {
-            facingDelta > 90f -> "MISALIGNED — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
-            facingDelta > 30f -> "SLIGHTLY OFF — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
-            else              -> "ALIGNED — camera facing $cameraDir."
-        }
+        val facingDelta = NavContextBuilder.bearingDelta(compassBearing, routeBearing)
+        val cameraDir = NavContextBuilder.bearingDescription(compassBearing)
+        val cameraVerdict =
+                when {
+                    facingDelta > 90f ->
+                            "MISALIGNED — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
+                    facingDelta > 30f ->
+                            "SLIGHTLY OFF — camera facing $cameraDir (${facingDelta.toInt()}° off route)."
+                    else -> "ALIGNED — camera facing $cameraDir."
+                }
 
-        return buildString {
-            appendLine("ROUTE: Go $routeDir.")
-            appendLine("TRAVEL STATUS: $travelVerdict")
-            appendLine("CAMERA STATUS: $cameraVerdict")
-            appendLine("NEXT STEP: \"$instruction\" in $distance.")
-        }
+        return NavContextBuilder.formatNavigationBlock(
+                navigating = true,
+                routeBearing = routeBearing,
+                compassBearing = compassBearing,
+                gpsBearing = gpsBearing,
+                hasValidGpsBearing = hasValidGpsBearing,
+                instructionText = instruction,
+                remainingDistanceText = distance,
+                routeSummary = NavStateManager.routeSummary,
+                isObstacleInFront = NavStateManager.isObstacleInFront,
+                travelVerdict = travelVerdict,
+                cameraVerdict = cameraVerdict
+        )
     }
 
     // ========================================
@@ -1466,7 +1474,8 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         reflexExecutor.shutdown()
         sensorManager.unregisterListener(sensorListener)
         uiScope.cancel()
-        visionCoordinator.close()
+        obstacleDetector.close()
         speechHelper.shutdown()
+        NavStateManager.isObstacleInFront = false
     }
 }

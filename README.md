@@ -58,14 +58,15 @@ You need to configure two API keys:
    - Directions API
    - Places API
 4. Create an API key and restrict it to your app
-5. Replace `YOUR_GOOGLE_MAPS_API_KEY` in `res/values/strings.xml`
+5. Copy `local.properties.example` to `local.properties` (gitignored) and set:
+   - `GOOGLE_MAPS_KEY` — Maps SDK + Places (manifest)
+   - `GOOGLE_DIRECTIONS_KEY` — Directions REST API
+   - `GEMINI_API_KEY` — Gemini generative API
 
 #### Gemini AI API Key
 1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
 2. Create an API key
-3. Replace `YOUR_GEMINI_API_KEY` in:
-   - `res/values/strings.xml`
-   - `vision/VisionActivity.kt` (the `API_KEY` constant)
+3. Add it as `GEMINI_API_KEY` in `local.properties` (injected into `BuildConfig` at compile time)
 
 ### 2. Build Configuration
 

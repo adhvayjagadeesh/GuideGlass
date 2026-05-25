@@ -3,10 +3,10 @@ package com.impairedvision.guideglass.data
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.location.Geocoder
 import android.location.Location
 import androidx.core.content.ContextCompat
 import com.google.android.gms.maps.model.LatLng
+import com.impairedvision.guideglass.util.GeocoderHelper
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.net.FindCurrentPlaceRequest
@@ -17,7 +17,6 @@ data class PlaceResult(val name: String, val latLng: LatLng)
 class PlacesRepository(private val context: Context) {
 
     private val placesClient = Places.createClient(context)
-    private val geocoder = Geocoder(context)
 
     companion object {
         private const val BIAS_DEGREES = 0.05 // Roughly 5km
@@ -68,38 +67,49 @@ class PlacesRepository(private val context: Context) {
         }
     }
 
-    @Suppress("DEPRECATION")
-    fun geocodeDestination(query: String, canonicalQuery: String, location: Location?): LatLng? {
+    suspend fun geocodeDestination(
+            query: String,
+            canonicalQuery: String,
+            location: Location?
+    ): LatLng? {
         return try {
-            var addresses = if (location != null) {
-                geocoder.getFromLocationName(
-                    query, 3,
-                    location.latitude - BIAS_DEGREES,
-                    location.longitude - BIAS_DEGREES,
-                    location.latitude + BIAS_DEGREES,
-                    location.longitude + BIAS_DEGREES
-                )
-            } else {
-                geocoder.getFromLocationName(query, 3)
-            }
+            var addresses =
+                    if (location != null) {
+                        GeocoderHelper.getAddressesFromLocationNameBiased(
+                                context,
+                                query,
+                                location.latitude - BIAS_DEGREES,
+                                location.longitude - BIAS_DEGREES,
+                                location.latitude + BIAS_DEGREES,
+                                location.longitude + BIAS_DEGREES,
+                                maxResults = 3
+                        )
+                    } else {
+                        GeocoderHelper.getAddressesFromLocationName(context, query, maxResults = 3)
+                    }
 
             if (addresses.isNullOrEmpty() && canonicalQuery != query) {
-                addresses = if (location != null) {
-                    geocoder.getFromLocationName(
-                        canonicalQuery, 3,
-                        location.latitude - BIAS_DEGREES,
-                        location.longitude - BIAS_DEGREES,
-                        location.latitude + BIAS_DEGREES,
-                        location.longitude + BIAS_DEGREES
-                    )
-                } else {
-                    geocoder.getFromLocationName(canonicalQuery, 3)
-                }
+                addresses =
+                        if (location != null) {
+                            GeocoderHelper.getAddressesFromLocationNameBiased(
+                                    context,
+                                    canonicalQuery,
+                                    location.latitude - BIAS_DEGREES,
+                                    location.longitude - BIAS_DEGREES,
+                                    location.latitude + BIAS_DEGREES,
+                                    location.longitude + BIAS_DEGREES,
+                                    maxResults = 3
+                            )
+                        } else {
+                            GeocoderHelper.getAddressesFromLocationName(
+                                    context,
+                                    canonicalQuery,
+                                    maxResults = 3
+                            )
+                        }
             }
 
-            addresses?.firstOrNull()?.let {
-                LatLng(it.latitude, it.longitude)
-            }
+            addresses?.firstOrNull()?.let { LatLng(it.latitude, it.longitude) }
         } catch (e: Exception) {
             null
         }

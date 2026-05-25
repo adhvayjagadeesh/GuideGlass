@@ -7,11 +7,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.io.ByteArrayOutputStream
 
-class GeminiManager {
+class GeminiManager(
+    apiKey: String,
+    modelName: String = DEFAULT_MODEL_NAME
+) {
 
     private val generativeModel = GenerativeModel(
-        modelName = "gemini-1.5-flash",
-        apiKey = "AIzaSyB6w379NsNIvbLnMqRf-x3DSZegIyYiZPw", // TODO: Move to Secrets
+        modelName = modelName,
+        apiKey = apiKey,
         systemInstruction = content {
             text("""
     ROLE: Directional Guide for a blind user.
@@ -26,12 +29,19 @@ class GeminiManager {
        - White Walking Person Icon = SAFE to cross.
        - Orange Hand = say "Wait to cross."
     4. NAV CONTEXT: The navigation block contains these fields — act on them exactly:
+       isObstacleInFront: when true, an on-device reflex already alerted the user.
        ROUTE: the compass direction the route requires.
        TRAVEL STATUS: pre-computed verdict on the user's movement direction.
        CAMERA STATUS: whether the phone camera is aligned with the route.
        NEXT STEP: current turn instruction and distance.
+       ROUTE SUMMARY: overall distance and duration for the active route.
 
-       TRAVEL STATUS rules (highest priority — override visual scene if needed):
+       When isObstacleInFront is true, prioritize calculating an immediate path adjustment
+       or alternative trajectory to guide the user safely around the obstruction. Do not
+       repeat "STOP" — the reflex layer already handled urgency.
+
+       TRAVEL STATUS rules (highest priority — override visual scene if needed, unless
+       isObstacleInFront is true, then obstacle avoidance guidance takes precedence):
        - Contains "WRONG WAY"    → say "Turn around, wrong direction."
        - Contains "HEADING AWAY" → say "Wrong way. Turn toward [ROUTE direction]."
        - Contains "OFF ROUTE"    → say "Bear [left/right] toward [ROUTE direction]."
@@ -51,7 +61,8 @@ class GeminiManager {
     fun analyzeWithGeminiStream(
         originalBitmap: Bitmap,
         navContext: String,
-        activeUserGoal: String?
+        activeUserGoal: String?,
+        isObstacleInFront: Boolean
     ): Flow<String> = flow {
         val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, 320, 320, true)
         val outputStream = ByteArrayOutputStream()
@@ -61,6 +72,7 @@ class GeminiManager {
         val dynamicPrompt = if (activeUserGoal != null) {
             """
             OBJECTIVE: Guide the user to "$activeUserGoal".
+            isObstacleInFront=$isObstacleInFront
             When they are directly in front of it, say 'You have reached the $activeUserGoal.' and end with [DONE].
             Otherwise, provide directional steps to reach it.
             """.trimIndent()
@@ -68,14 +80,15 @@ class GeminiManager {
             """
             REAL-TIME NAVIGATION METADATA:
             $navContext
-            
-            TASK: Use the metadata and image to provide ONLY the next directional instruction. 
-            Prioritize the TRAVEL STATUS above all else.
+
+            TASK: Use the metadata and image to provide ONLY the next directional instruction.
+            If isObstacleInFront is true, guide around the obstruction immediately.
+            Otherwise prioritize TRAVEL STATUS.
             """.trimIndent()
         }
 
         val fullResponse = StringBuilder()
-        
+
         generativeModel.generateContentStream(
             content {
                 blob("image/jpeg", compressedImageData)
@@ -87,5 +100,9 @@ class GeminiManager {
                 emit(fullResponse.toString())
             }
         }
+    }
+
+    companion object {
+        const val DEFAULT_MODEL_NAME = "gemini-1.5-flash"
     }
 }

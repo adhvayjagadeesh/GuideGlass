@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.impairedvision.guideglass.maps.NavStateManager
 import com.impairedvision.guideglass.vision.ObstacleDetector
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
@@ -51,7 +52,19 @@ class VisionRepository(private val context: Context) {
                 // Update LIFO buffer for Gemini
                 latestFrame.set(bitmap)
                 // Fast obstacle detection path
-                obstacleDetector.processFrame(bitmap, onDangerDetected)
+                obstacleDetector.processFrame(
+                        bitmap,
+                        object : ObstacleDetector.Listener {
+                            override fun onObstacleEntered() {
+                                NavStateManager.isObstacleInFront = true
+                                onDangerDetected()
+                            }
+
+                            override fun onObstacleCleared() {
+                                NavStateManager.isObstacleInFront = false
+                            }
+                        }
+                )
             }
         }
         return imageAnalysis

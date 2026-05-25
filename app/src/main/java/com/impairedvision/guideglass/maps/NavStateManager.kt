@@ -13,4 +13,12 @@ object NavStateManager {
 
     @Volatile
     var currentStepIndex: Int = 0      // Which step the user is currently on
+
+    /** Set by ML Kit reflex layer; consumed by Gemini nav context. */
+    @Volatile
+    var isObstacleInFront: Boolean = false
+
+    /** Overall route metrics, e.g. "2.1 km • 28 min". */
+    @Volatile
+    var routeSummary: String = ""
 }
