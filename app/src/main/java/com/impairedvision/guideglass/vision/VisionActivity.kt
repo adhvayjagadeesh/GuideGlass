@@ -61,6 +61,11 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         private const val TAG = "VisionActivity"
         private const val THROTTLE_MS = 1500L
         private const val CAMERA_PERMISSION_CODE = 10
+
+        // Reflex STOP rate-limiting: at most one urgent alert per cooldown, and only after the
+        // previous obstacle truly cleared and re-armed. Prevents "STOP STOP STOP" flicker spam.
+        private const val STOP_COOLDOWN_MS = 3500L
+        private const val REARM_CLEAR_MS = 1200L
     }
 
     // ===== VISION UI (vision-only mode) =====
@@ -112,7 +117,11 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     private var combinedMode = false
     /** Single gate for Tier-2 Gemini work (replaces legacy isProcessing + geminiInFlight). */
     private val geminiInFlight = AtomicBoolean(false)
-    @Volatile private var reflexFiredThisCycle = false
+
+    // ===== REFLEX ALERT RATE-LIMIT STATE =====
+    @Volatile private var lastStopAlertMs = 0L
+    @Volatile private var lastObstacleClearMs = 0L
+    @Volatile private var obstacleWasCleared = true
 
     // ===== ROUTE BEARING STATE =====
     private var routeBearing: Float = 0f
@@ -1201,20 +1210,31 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun processFrame(bitmap: Bitmap, currentTime: Long) {
-        reflexFiredThisCycle = false
-
         obstacleDetector.processFrame(
                 bitmap,
                 object : ObstacleDetector.Listener {
-                    override fun onObstacleEntered() {
+                    override fun onObstacleEntered(decision: ObstacleDetector.ReflexDecision) {
+                        // Persistent flag: the reflex fires STOP at most once per cooldown here,
+                        // then Gemini (and the local hint) take over while the flag stays set.
                         NavStateManager.isObstacleInFront = true
-                        reflexFiredThisCycle = true
-                        runOnUiThread { fireReflexStopAlert() }
+
+                        val now = System.currentTimeMillis()
+                        val cooledDown = now - lastStopAlertMs >= STOP_COOLDOWN_MS
+                        val rearmed = obstacleWasCleared && now - lastObstacleClearMs >= REARM_CLEAR_MS
+                        if (cooledDown && rearmed) {
+                            lastStopAlertMs = now
+                            obstacleWasCleared = false
+                            runOnUiThread { fireReflexStopAlert(decision) }
+                        }
+
+                        // Best-effort fresh, obstacle-aware Gemini guidance (gated normally).
                         maybeLaunchGemini(bitmap, currentTime, bypassThrottle = true)
                     }
 
                     override fun onObstacleCleared() {
                         NavStateManager.isObstacleInFront = false
+                        obstacleWasCleared = true
+                        lastObstacleClearMs = System.currentTimeMillis()
                     }
                 }
         )
@@ -1222,8 +1242,15 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         maybeLaunchGemini(bitmap, currentTime, bypassThrottle = false)
     }
 
-    private fun fireReflexStopAlert() {
-        speechHelper.speakUrgent("STOP. Obstacle ahead.")
+    private fun fireReflexStopAlert(decision: ObstacleDetector.ReflexDecision) {
+        // Immediate, network-independent guidance: speak a conservative veer hint when the reflex
+        // is confident a side is clear. Otherwise just STOP — Gemini may refine guidance shortly.
+        val alert = when (decision.avoidance) {
+            ObstacleDetector.AvoidanceHint.VEER_LEFT -> "Stop. Obstacle ahead. Veer left."
+            ObstacleDetector.AvoidanceHint.VEER_RIGHT -> "Stop. Obstacle ahead. Veer right."
+            ObstacleDetector.AvoidanceHint.NONE -> "Stop. Obstacle ahead."
+        }
+        speechHelper.speakUrgent(alert)
         updateStatusText("OBSTACLE ALERT")
         VibrationHelper.vibrateOneShot(this, 200L)
     }
@@ -1259,13 +1286,19 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
             val navCtx = buildNavContext()
             val userGoal = activeUserGoal
 
+            // GeminiManager emits cumulative chunks; speak only once when the stream completes.
+            var finalResponse = ""
             geminiManager.analyzeWithGeminiStream(
                             originalBitmap,
                             navCtx,
                             userGoal,
                             NavStateManager.isObstacleInFront
                     )
-                    .collect { responseText -> handleGeminiFinalResponse(responseText) }
+                    .collect { cumulativeChunk -> finalResponse = cumulativeChunk }
+
+            if (finalResponse.isNotBlank()) {
+                handleGeminiFinalResponse(finalResponse)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Gemini API Error: ${e.message}")
             runOnUiThread { updateStatusText("Analysis error") }
@@ -1280,10 +1313,20 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
             updateInstructionText(cleanText)
             updateStatusText("Ready")
 
-            if (cleanText.contains("STOP", ignoreCase = true) && reflexFiredThisCycle) {
-                Log.d(TAG, "Suppressing Gemini STOP — depth reflex already fired this cycle")
-            } else {
-                speechHelper.speak(cleanText)
+            val obstaclePresent = NavStateManager.isObstacleInFront
+            val saysStop = cleanText.contains("STOP", ignoreCase = true)
+            val saysClear = isPathClearMessage(cleanText)
+
+            // While an obstacle is active, only block the two responses that contradict the reflex:
+            // a duplicate STOP, and reassuring "path clear / walk forward". Directional avoidance
+            // guidance ("veer left", "step right", "turn around") is allowed through. Once the
+            // obstacle clears, even "path clear" is valid and spoken normally.
+            when {
+                obstaclePresent && saysStop ->
+                        Log.d(TAG, "Suppressing Gemini STOP — reflex owns urgent alert")
+                obstaclePresent && saysClear ->
+                        Log.d(TAG, "Suppressing 'clear' guidance — obstacle still in front")
+                else -> speechHelper.speak(cleanText)
             }
 
             if (resultText.contains("[DONE]", ignoreCase = true)) {
@@ -1296,6 +1339,16 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
                 Log.d(TAG, "Task completed and goal cleared automatically.")
             }
         }
+    }
+
+    /** Heuristic: does Gemini's text reassure the path is open (contradicts an active reflex)? */
+    private fun isPathClearMessage(text: String): Boolean {
+        val t = text.lowercase()
+        return t.contains("path is clear") ||
+                t.contains("path clear") ||
+                t.contains("walk forward") ||
+                t.contains("clear to") ||
+                t.contains("all clear")
     }
 
     // ========================================

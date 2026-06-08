@@ -55,7 +55,9 @@ class VisionRepository(private val context: Context) {
                 obstacleDetector.processFrame(
                         bitmap,
                         object : ObstacleDetector.Listener {
-                            override fun onObstacleEntered() {
+                            override fun onObstacleEntered(
+                                decision: ObstacleDetector.ReflexDecision
+                            ) {
                                 NavStateManager.isObstacleInFront = true
                                 onDangerDetected()
                             }

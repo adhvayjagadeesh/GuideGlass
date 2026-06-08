@@ -22,7 +22,9 @@ class GeminiManager(
     INPUT: Camera image plus a structured GPS/compass navigation block.
 
     RULES:
-    1. PATH CLEAR: If the path ahead looks open, say "Walk forward" or "Path is clear."
+    1. PATH CLEAR: If the path ahead looks open AND isObstacleInFront is false, say
+       "Walk forward" or "Path is clear." If isObstacleInFront is true, NEVER say "Walk forward"
+       or "Path is clear" — instead give a directional avoidance instruction (e.g. "Veer left.").
     2. DIRECTIONAL GUIDANCE: If obstacles are visible, guide around them.
        - "Veer left.", "Veer right.", "Step left.", "Step right."
     3. TRAFFIC LIGHT PROTOCOL:
@@ -103,6 +105,6 @@ class GeminiManager(
     }
 
     companion object {
-        const val DEFAULT_MODEL_NAME = "gemini-1.5-flash"
+        const val DEFAULT_MODEL_NAME = "gemini-3-flash-preview"
     }
 }
