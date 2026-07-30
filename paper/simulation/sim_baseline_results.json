@@ -1,0 +1,38 @@
+{
+  "scenes": {
+    "hazard_free": 16000,
+    "hazard": 8000
+  },
+  "rules": {
+    "R1  Optical tau criterion [24]": {
+      "fa": 31.025000000000002,
+      "miss": 24.474999999999998,
+      "flip": 0.0,
+      "mean_warn_dist_m": 5.514549999999999
+    },
+    "R2  Fixed apparent-size gate": {
+      "fa": 26.23125,
+      "miss": 22.3625,
+      "flip": 0.0,
+      "mean_warn_dist_m": 2.3285
+    },
+    "R3  Ground-contact bottom edge": {
+      "fa": 5.71875,
+      "miss": 57.8625,
+      "flip": 14.31875,
+      "mean_warn_dist_m": 3.12475
+    },
+    "R4  Monocular relative depth [26]": {
+      "fa": 11.16875,
+      "miss": 47.6625,
+      "flip": 23.49375,
+      "mean_warn_dist_m": 2.85315
+    },
+    "R5  Shipped VisionAI rule": {
+      "fa": 2.0,
+      "miss": 47.387499999999996,
+      "flip": 0.0,
+      "mean_warn_dist_m": 3.7571999999999997
+    }
+  }
+}

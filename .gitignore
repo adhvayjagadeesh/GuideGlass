@@ -17,3 +17,6 @@ bin/
 gen/
 out/
 .DS_Store
+
+# Office temp lock files
+~$*
