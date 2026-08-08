@@ -20,3 +20,7 @@ out/
 
 # Office temp lock files
 ~$*
+
+# Paper manuscripts, kept locally and not published
+*.docx
+*.doc
