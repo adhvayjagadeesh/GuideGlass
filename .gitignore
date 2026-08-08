@@ -24,3 +24,7 @@ out/
 # Paper manuscripts, kept locally and not published
 *.docx
 *.doc
+
+# Presentation decks and Python caches
+*.pptx
+__pycache__/

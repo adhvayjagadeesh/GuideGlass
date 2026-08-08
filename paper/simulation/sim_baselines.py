@@ -247,44 +247,61 @@ def warning_distance(seed=71, trials=400):
 
 # ---------------------------------------------------------------- figure
 SHORT = {
-    "R1  Optical tau criterion [24]": "R1  Optical tau only [24]",
+    "R1  Optical tau criterion [24]": "R1  Optical tau only [11]",
     "R2  Fixed apparent-size gate": "R2  Apparent size only",
     "R3  Ground-contact bottom edge": "R3  Ground-contact edge",
-    "R4  Monocular relative depth [26]": "R4  Monocular depth [26]",
+    "R4  Monocular relative depth [26]": "R4  Monocular depth [13]",
     "R5  Shipped VisionAI rule": "R5  Shipped rule (ours)",
 }
 
 
 def fig_baselines(path, res):
+    """Four measures, five rules. R5 is highlighted with a tinted row band drawn
+    behind the marks, so the emphasis can never overlap a label or a value."""
     panels = [
-        ("fa", "False alarm rate on\nhazard-free scenes (%)", True),
-        ("mean_warn_dist_m", "Mean distance at\nfirst alert (m)", False),
-        ("flip", "Decisions changed by\n8 deg pitch shift (%)", True),
-        ("miss", "Miss rate on\nhazard scenes (%)", True),
+        ("fa", "False alarm rate on\nhazard-free scenes (%)"),
+        ("mean_warn_dist_m", "Mean distance at\nfirst alert (m)"),
+        ("flip", "Decisions changed by\n8 deg pitch shift (%)"),
+        ("miss", "Miss rate on\nhazard scenes (%)"),
     ]
     names = [n for n, _, _ in RULES]
+    ours = len(names) - 1                      # R5 is the last row
     ypos = np.arange(len(names))[::-1]
-    fig, axes = plt.subplots(2, 2, figsize=(FIGW, 4.1))
-    for ax, (key, label, lower_better) in zip(axes.ravel(), panels):
+    fig, axes = plt.subplots(2, 2, figsize=(7.0, 4.6))
+
+    for ax, (key, label) in zip(axes.ravel(), panels):
         vals = [res[n][key] for n in names]
-        best = min(vals) if lower_better else max(vals)
+        top = max(vals) * 1.30
+
+        # highlight band behind everything, full panel width
+        ax.axhspan(ypos[ours] - 0.46, ypos[ours] + 0.46,
+                   xmin=0, xmax=1, color="#e4eefb", zorder=0)
+
         for y, n, v in zip(ypos, names, vals):
-            ours = n.startswith("R5")
-            ax.barh(y, v, height=0.62, zorder=3,
-                    color=BLUE if ours else "#c8d6e8",
-                    edgecolor="#ffffff", linewidth=1.4)
-            ax.text(v + max(vals) * 0.035, y, ("%.1f" % v) if key != "mean_warn_dist_m"
-                    else ("%.2f" % v), va="center", fontsize=7.8,
-                    color=INK if ours else SEC,
-                    fontweight="bold" if abs(v - best) < 1e-9 else "normal")
+            is_ours = (n == names[ours])
+            ax.barh(y, v, height=0.60, zorder=3,
+                    color=BLUE if is_ours else "#ccd8e8",
+                    edgecolor="#ffffff", linewidth=1.2)
+            ax.text(v + top * 0.028, y,
+                    ("%.1f" % v) if key != "mean_warn_dist_m" else ("%.2f" % v),
+                    va="center", fontsize=8.6,
+                    color=INK if is_ours else SEC,
+                    fontweight="bold" if is_ours else "normal", zorder=4)
+
         ax.set_yticks(ypos)
-        ax.set_yticklabels([SHORT[n] for n in names], fontsize=7.6, color=INK)
-        ax.set_xlim(0, max(vals) * 1.30)
-        ax.set_xlabel(label, fontsize=8.2)
+        ax.set_yticklabels([SHORT[n] for n in names], fontsize=8.4, color=SEC)
+        for lbl in ax.get_yticklabels():
+            if lbl.get_text() == SHORT[names[ours]]:
+                lbl.set_fontweight("bold")
+                lbl.set_color(INK)
+        ax.set_xlim(0, top)
+        ax.set_xlabel(label, fontsize=8.8)
         ax.grid(axis="y", visible=False)
-        ax.tick_params(axis="x", labelsize=7.4)
+        ax.grid(axis="x", zorder=1)
+        ax.tick_params(axis="x", labelsize=8)
         strip_spines(ax)
-    fig.tight_layout(h_pad=1.6, w_pad=2.4)
+
+    fig.tight_layout(h_pad=1.8, w_pad=2.6)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
