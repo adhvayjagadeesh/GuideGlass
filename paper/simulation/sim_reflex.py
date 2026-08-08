@@ -370,64 +370,83 @@ def hint_map(res=400):
 FIGW = 6.3
 
 def fig1_architecture(path):
-    fig, ax = plt.subplots(figsize=(FIGW, 3.6))
-    ax.set_xlim(0, 100); ax.set_ylim(0, 60)
+    """Left-to-right flow. One fork after the camera, one merge into arbitration,
+    horizontal label runs, and no crossing edges."""
+    fig, ax = plt.subplots(figsize=(7.6, 4.8))
+    ax.set_xlim(-1, 120); ax.set_ylim(-3, 74)
     ax.axis("off")
 
-    def box(x, y, w, h, lines, fc="#f4f6fa", ec=BLUE, lw=1.2, fs=8.6, bold_first=True):
-        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.6",
-                                    fc=fc, ec=ec, lw=lw))
-        n = len(lines)
+    def box(x0, x1, y0, y1, title, lines, fc="#ffffff", ec=BASE, lw=1.3):
+        ax.add_patch(FancyBboxPatch((x0, y0), x1 - x0, y1 - y0,
+                                    boxstyle="round,pad=0.6", fc=fc, ec=ec, lw=lw))
+        cx = (x0 + x1) / 2.0
+        gap = 5.4
+        block = gap * len(lines)
+        ty = (y0 + y1) / 2.0 + block / 2.0
+        ax.text(cx, ty, title, ha="center", va="center",
+                fontsize=11, fontweight="bold", color=INK)
         for k, ln in enumerate(lines):
-            wgt = "bold" if (k == 0 and bold_first) else "normal"
-            col = INK if k == 0 else SEC
-            ax.text(x + w / 2, y + h - (k + 0.5) * h / n, ln, ha="center",
-                    va="center", fontsize=fs if k == 0 else fs - 0.6,
-                    fontweight=wgt, color=col)
+            ax.text(cx, ty - gap * (k + 1), ln, ha="center", va="center",
+                    fontsize=9.5, color=SEC)
 
-    def arrow(x0, y0, x1, y1, color=SEC, lw=1.1, style="-|>"):
-        ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle=style,
-                                     mutation_scale=9, color=color, lw=lw))
+    def arrow(p0, p1, color=SEC, lw=1.4):
+        ax.add_patch(FancyArrowPatch(p0, p1, arrowstyle="-|>", mutation_scale=13,
+                                     color=color, lw=lw, shrinkA=0, shrinkB=0))
 
-    # sensors
-    box(2, 44, 20, 12, ["Glasses camera", "frame stream"], fc="#ffffff", ec=BASE)
-    box(2, 26, 20, 12, ["GPS + compass", "location, bearing"], fc="#ffffff", ec=BASE)
-    box(2, 8, 20, 12, ["Google Maps route", "steps, summary"], fc="#ffffff", ec=BASE)
+    def line(p0, p1, color=SEC, lw=1.4):
+        ax.plot([p0[0], p1[0]], [p0[1], p1[1]], color=color, lw=lw,
+                solid_capstyle="round", zorder=1)
 
-    # tier 1
-    box(30, 40, 28, 17, ["Tier 1  on-device reflex",
-                         "object detection, corridor gate",
-                         "size + looming checks",
-                         "edge-triggered state machine"], fc="#eaf1fb", ec=BLUE)
-    ax.text(44, 58.5, "under 100 ms target", fontsize=8, color=BLUE,
+    # ---- boxes -----------------------------------------------------------
+    box(2, 29, 40, 55, "Glasses Camera", ["Frame stream"])
+    box(2, 29, 21, 35, "GPS and Compass", ["Location, bearing"])
+    box(2, 29, 2, 16, "Google Maps Route", ["Steps, summary"])
+
+    box(39, 73, 49, 70, "Tier 1   On-Device Reflex",
+        ["Corridor gate", "Size and looming checks", "Edge-triggered alerts"],
+        fc="#eaf1fb", ec=BLUE)
+    box(39, 73, 21, 39, "Tier 2   Cloud MLLM",
+        ["Scene and context reasoning", "Guidance under 12 words"],
+        fc="#e9f7f1", ec=AQUA)
+    box(39, 73, 2, 15, "Navigation Context Builder", ["Bearing, next step"])
+
+    box(90, 118, 37, 56, "Arbitration",
+        ["Urgent alerts pre-empt", "Duplicates dropped"])
+    box(90, 118, 10, 29, "Single Audio Stream", ["Speech and haptics"],
+        fc="#fdf0ec", ec=ORANGE)
+
+    # ---- timing annotations ---------------------------------------------
+    ax.text(56, 72.2, "Under 100 ms target", fontsize=9.5, color=BLUE,
+            ha="center", style="italic")
+    ax.text(62, 17.6, "1.5 to 3 s measured", fontsize=9.5, color="#12775a",
             ha="center", style="italic")
 
-    # nav context + tier 2
-    box(30, 21, 28, 10, ["Navigation context builder",
-                         "obstacle flag, bearing, next step"], fc="#ffffff", ec=BASE)
-    box(30, 3, 28, 13, ["Tier 2  cloud MLLM",
-                        "scene + context reasoning",
-                        "guidance under 12 words"], fc="#e9f7f1", ec=AQUA)
-    ax.text(44, 1.0, "1.5 to 3 s measured", fontsize=8, color="#12775a",
-            ha="center", style="italic")
+    # ---- edges -----------------------------------------------------------
+    # camera forks to both tiers from a single junction
+    jx, jy = 34.0, 47.5
+    line((29, jy), (jx, jy))
+    ax.plot([jx], [jy], marker="o", ms=5, color=SEC, zorder=3)
+    arrow((jx, jy), (39, 58.0))
+    arrow((jx, jy), (39, 31.0))
 
-    # arbitration + output
-    box(68, 26, 28, 16, ["Arbitration + suppression",
-                         "urgent alerts pre-empt",
-                         "duplicates dropped"], fc="#ffffff", ec=BASE)
-    box(68, 6, 28, 12, ["Single audio stream",
-                        "speech + haptic pulse"], fc="#fdf0ec", ec=ORANGE)
+    # location inputs feed the context builder
+    arrow((29, 28), (39, 11.0))
+    arrow((29, 9), (39, 7.5))
 
-    arrow(22, 50, 30, 50)                    # camera -> tier1
-    arrow(22, 50, 27, 50); arrow(26, 50, 30, 12.5)  # camera -> tier2 (drawn long)
-    arrow(22, 32, 30, 27.5)                  # gps -> context
-    arrow(22, 14, 30, 25)                    # route -> context
-    arrow(44, 21, 44, 16)                    # context -> tier2
-    arrow(58, 48, 68, 38)                    # tier1 -> arbitration
-    arrow(58, 9.5, 68, 30)                   # tier2 -> arbitration
-    arrow(82, 26, 82, 18)                    # arbitration -> audio
-    ax.text(63, 47.5, "STOP, veer hint", fontsize=7.6, color=BLUE, rotation=-38)
-    ax.text(61.5, 14, "directional guidance", fontsize=7.6, color="#12775a", rotation=39)
+    # context builder feeds Tier 2 from below
+    arrow((50, 15), (50, 21))
+
+    # tiers merge into arbitration along horizontal label runs
+    line((73, 58), (86, 58))
+    arrow((86, 58), (90, 50.5))
+    line((73, 31), (86, 31))
+    arrow((86, 31), (90, 42.0))
+
+    # arbitration to audio
+    arrow((104, 37), (104, 29))
+
+    ax.text(79.5, 61.0, "Urgent", fontsize=9.5, color=BLUE, ha="center")
+    ax.text(79.5, 27.2, "Guidance", fontsize=9.5, color="#12775a", ha="center")
 
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")

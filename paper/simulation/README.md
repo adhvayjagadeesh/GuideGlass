@@ -44,6 +44,64 @@ python3 sim_reflex.py && python3 sim_extra.py && python3 sim_baselines.py
 All seeds are fixed. A clean re-run reproduces all 13 PNGs and all 3 JSON files
 byte-identically, verified with `cmp`.
 
+## Study protocol (the one reported in the paper)
+
+**Scene model.** Each scene draws an obstacle height (0.3–1.9 m), width
+(0.15–0.9 m), distance (0.8–9 m), and lateral offset (±2.5 m), plus a hand-held
+camera pitch between 10° up and 30° down and a camera height of 1.3 m ± 0.08.
+A quarter of scenes contain only a distant wall or fence. Apparent box size
+follows pinhole projection. **A scene counts as a hazard when the object lies in
+the walking path (±0.45 m) within 2.5 m.**
+
+**Sampling.** False-alarm and miss rates are estimated on separate stratified
+draws — 16,000 hazard-free scenes and 8,000 hazard scenes — so both rates rest on
+adequate support. Every rule receives the identical trailing 0.9 s of
+observations, so none is advantaged by information the others lack.
+
+**Pitch stability.** The same scene is re-evaluated with pitch perturbed ±8°
+while the detector noise realisation is held fixed, so the measure isolates pitch
+sensitivity rather than noise.
+
+### The five decision rules compared (paper Fig. 3)
+
+| Rule | Criterion |
+|---|---|
+| R1 | Optical time-to-contact alone (Lee 1976), τ ≤ 2 s, **no spatial gate** |
+| R2 | Fixed apparent-size threshold alone, height ≥ 0.34 of frame |
+| R3 | Ground-contact bottom-edge heuristic (also our first prototype) |
+| R4 | Idealised monocular relative depth (MiDaS-style), with scale ambiguity and ground-plane confusion modelled |
+| R5 | **Shipped rule** — corridor gate, background-width rejection, size gates, looming, 2-frame confirmation |
+
+R1–R4 are reimplementations of published *criteria* under the assumptions above.
+They are **not** reimplementations of any product, and no claim is made about how
+any deployed system performs.
+
+## Expected results
+
+A correct re-run reproduces these exactly. Use them to check your run.
+
+| Rule | False alarm % | Miss % | Pitch flip % | Mean alert distance |
+|---|---|---|---|---|
+| R1 | 31.03 | 24.5 | 0.0 | 5.51 m |
+| R2 | 26.23 | 22.4 | 0.0 | 2.33 m |
+| R3 | 5.72 | 57.9 | 14.3 | 3.12 m |
+| R4 | 11.17 | 47.7 | 23.5 | 2.85 m |
+| **R5 (ours)** | **2.00** | 47.4 | **0.0** | 3.76 m |
+
+R1, R2 and R5 read only apparent size, so their 0.0 % pitch flip is structural
+rather than statistical.
+
+Other quoted values:
+
+| Quantity | Value | Source |
+|---|---|---|
+| First alert, standing person / bin / bollard | 4.33 / 2.80 / 2.80 m | `sim_results.json` |
+| Low curb | never alerts (rejected by width gate) | `sim_results.json` |
+| Double approach, shipped vs level-triggered | 2 vs 81 alerts | `sim_results.json` |
+| Spurious alerts per min, 5 % / 20 % flicker | 1.28 / 9.66 | `sim_extra_results.json` |
+| Veer hint silent fraction | 71.3 % | `sim_results.json` |
+| Veer hint unsafe-side rate | 0.18 % | `sim_extra_results.json` |
+
 ## Where the constants come from
 
 | Source | Constants |
