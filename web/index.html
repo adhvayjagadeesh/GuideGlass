@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>GuideGlass</title>
+  <link rel="stylesheet" href="css/app.css">
+  <!-- Reflex model: TensorFlow.js + COCO-SSD, the browser stand-in for ML Kit -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <!-- API keys: copy config.example.js -> config.js (gitignored) -->
+  <script src="config.js"></script>
+</head>
+<body data-mode="">
+
+<header>
+  <h1>Guide<span>Glass</span></h1>
+  <div id="status" class="status">loading…</div>
+  <nav class="modes" aria-label="Mode">
+    <button data-mode="vision">👁 Vision</button>
+    <button data-mode="navigation">🗺 Navigation</button>
+    <button data-mode="combined" class="primary">👁+🗺 Combined</button>
+    <button id="stopBtn" class="danger">■ Stop</button>
+  </nav>
+</header>
+
+<main>
+  <section class="panel camera" aria-label="Camera">
+    <div class="viewport">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+      <div class="pills">
+        <span id="reflexState" class="pill">reflex off</span>
+        <span id="latency" class="pill dim">— ms</span>
+      </div>
+    </div>
+    <div id="guidance" class="guidance" role="status" aria-live="polite">—</div>
+    <div class="row">
+      <button id="pauseBtn">Pause analysis</button>
+      <button id="flipBtn">Flip camera</button>
+      <label class="grow">Goal <input id="goal" placeholder='e.g. "the door", "the crosswalk"' autocomplete="off"></label>
+    </div>
+  </section>
+
+  <section class="panel maps" aria-label="Navigation">
+    <div class="row">
+      <input id="search" class="grow" placeholder="Search a destination…" autocomplete="off">
+      <button id="goBtn" class="primary">Go</button>
+      <button id="cancelNavBtn">Cancel</button>
+      <button id="centerBtn" title="Center on me">◎</button>
+    </div>
+    <div id="map" class="map"></div>
+    <details class="sim" open>
+      <summary>Desktop testing</summary>
+      <div class="row">
+        <label><input type="checkbox" id="simToggle"> Simulate — click map to move, slider sets heading</label>
+      </div>
+      <div class="row">
+        <label class="grow">Heading <input type="range" id="heading" min="0" max="359" value="0"></label>
+        <span id="headingVal" class="mono">— (no compass)</span>
+      </div>
+      <div class="row"><span class="dim">Position</span> <span id="simPos" class="mono">—</span></div>
+    </details>
+  </section>
+
+  <section class="panel commands" aria-label="Commands">
+    <form id="cmdForm" class="row">
+      <input id="cmd" class="grow" placeholder='"navigate to city hall", "nearest coffee", "find the door", "stop"' autocomplete="off">
+      <button type="submit">Send</button>
+      <button type="button" id="micBtn" title="Speak a command">🎤</button>
+    </form>
+    <div id="voiceStatus" class="dim mono">idle</div>
+  </section>
+
+  <section class="panel context" aria-label="Navigation context sent to Gemini">
+    <details>
+      <summary>Nav context → Gemini</summary>
+      <pre id="navState" class="mono">NAVIGATION: inactive.</pre>
+    </details>
+  </section>
+
+  <section class="panel log" aria-label="Transcript">
+    <ul id="transcript" class="transcript"></ul>
+  </section>
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

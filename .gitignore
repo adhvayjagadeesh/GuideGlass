@@ -28,3 +28,6 @@ out/
 # Presentation decks and Python caches
 *.pptx
 __pycache__/
+
+# Web client keys
+web/config.js
