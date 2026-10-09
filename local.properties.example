@@ -6,3 +6,7 @@ sdk.dir=C\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
 GEMINI_API_KEY=your_gemini_api_key
 GOOGLE_MAPS_KEY=your_google_maps_key
 GOOGLE_DIRECTIONS_KEY=your_google_directions_key
+
+# Meta Wearables Device Access Toolkit (optional). Leave unset to run in Developer Mode.
+# MWDAT_APPLICATION_ID=
+# MWDAT_CLIENT_TOKEN=

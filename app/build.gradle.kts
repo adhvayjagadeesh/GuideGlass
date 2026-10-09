@@ -43,6 +43,10 @@ android {
         )
         resValue("string", "gemini_api_key", geminiApiKey.ifEmpty { "MISSING_GEMINI_API_KEY" })
 
+        // Meta Wearables credentials. "0" runs the toolkit in Developer Mode.
+        manifestPlaceholders["mwdat_application_id"] = localProp("MWDAT_APPLICATION_ID").ifEmpty { "0" }
+        manifestPlaceholders["mwdat_client_token"] = localProp("MWDAT_CLIENT_TOKEN").ifEmpty { "0" }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -149,9 +153,17 @@ dependencies {
     implementation("com.squareup.moshi:moshi:1.15.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.0")
 
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    // Coroutines, aligned with the version the Meta Wearables toolkit requires
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
+
+    // Meta Wearables Device Access Toolkit: Ray-Ban Meta camera stream (developer preview)
+    val mwdat_version = "1.0.0"
+    implementation("com.meta.wearable:mwdat-core:$mwdat_version")
+    implementation("com.meta.wearable:mwdat-camera:$mwdat_version")
+    // Simulated glasses for tests. Kept out of release builds.
+    debugImplementation("com.meta.wearable:mwdat-mockdevice:$mwdat_version")
+    androidTestImplementation("com.meta.wearable:mwdat-mockdevice:$mwdat_version")
 
     // Material Design
     implementation("com.google.android.material:material:1.11.0")

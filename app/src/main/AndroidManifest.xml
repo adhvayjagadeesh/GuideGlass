@@ -34,6 +34,23 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="@string/google_maps_key" />
 
+        <!-- Meta Wearables Device Access Toolkit. "0" is Developer Mode; real values come from
+             local.properties (MWDAT_APPLICATION_ID, MWDAT_CLIENT_TOKEN) via the build. -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="${mwdat_application_id}" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="${mwdat_client_token}" />
+        <!-- The toolkit reports analytics and crashes to Meta by default. This app is meant for
+             research with blind and low-vision participants, so both are off. -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT"
+            android:value="true" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CRASH_REPORTING_OPT_OUT"
+            android:value="true" />
+
         <!-- Main Launcher Activity -->
         <activity
             android:name=".MainActivity"
@@ -42,6 +59,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The Meta AI app returns here after the user approves glasses access. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="guideglass" />
             </intent-filter>
         </activity>
 

@@ -116,6 +116,26 @@ fun MainMenu(modifier: Modifier = Modifier) {
             Text(text = "🚶 Vision + Navigation", fontSize = 22.sp)
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Vision mode on the Meta glasses camera, with the phone camera as fallback
+        Button(
+            onClick = {
+                val intent = Intent(context, VisionActivity::class.java)
+                intent.putExtra(VisionActivity.EXTRA_CAMERA_SOURCE, VisionActivity.CAMERA_SOURCE_GLASSES)
+                context.startActivity(intent)
+            },
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .height(90.dp)
+                .padding(vertical = 8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Text(text = "🕶️ Vision with Meta Glasses", fontSize = 22.sp)
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         Text(

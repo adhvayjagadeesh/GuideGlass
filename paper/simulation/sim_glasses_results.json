@@ -1,0 +1,84 @@
+{
+  "glasses_fov_deg": {
+    "h": 60.6,
+    "v": 92.2,
+    "basis": "100 deg diagonal, 9:16 portrait, unverified"
+  },
+  "configs": {
+    "PHONE": {
+      "fa": 2.066666666666667,
+      "miss": 48.1,
+      "off_axis_miss": 84.9090909090909,
+      "off_axis_n": 1100,
+      "warn_m": 3.7124000000000037,
+      "thresholds": {
+        "cmin": 0.32,
+        "cmax": 0.68,
+        "near_h": 0.34,
+        "near_a": 0.12,
+        "loom_h": 0.16,
+        "loom_a": 0.03,
+        "max_w": 0.9
+      }
+    },
+    "GLASSES": {
+      "fa": 0.825,
+      "miss": 56.55,
+      "off_axis_miss": 79.63636363636364,
+      "off_axis_n": 1100,
+      "warn_m": 2.2937333333333365,
+      "thresholds": {
+        "cmin": 0.32,
+        "cmax": 0.68,
+        "near_h": 0.34,
+        "near_a": 0.12,
+        "loom_h": 0.16,
+        "loom_a": 0.03,
+        "max_w": 0.9
+      }
+    },
+    "GLASSES_R": {
+      "fa": 1.9833333333333334,
+      "miss": 47.43333333333333,
+      "off_axis_miss": 81.54545454545455,
+      "off_axis_n": 1100,
+      "warn_m": 3.7124000000000037,
+      "thresholds": {
+        "cmin": 0.3634,
+        "cmax": 0.6366,
+        "near_h": 0.189,
+        "near_a": 0.0485,
+        "loom_h": 0.0889,
+        "loom_a": 0.0121,
+        "max_w": 0.9
+      }
+    }
+  },
+  "hfov_sweep_rescaled": {
+    "50.0": {
+      "vfov": 79.3,
+      "fa": 2.04,
+      "miss": 47.3,
+      "off_axis_miss": 83.0
+    },
+    "60.6": {
+      "vfov": 92.2,
+      "fa": 1.98,
+      "miss": 47.43,
+      "off_axis_miss": 81.55
+    },
+    "70.0": {
+      "vfov": 102.4,
+      "fa": 1.93,
+      "miss": 49.48,
+      "off_axis_miss": 84.18
+    },
+    "80.0": {
+      "vfov": 112.3,
+      "fa": 1.89,
+      "miss": 51.82,
+      "off_axis_miss": 87.18
+    }
+  },
+  "latency_note": "each 100 ms of transport latency removes 0.1 s and 0.14 m of warning at 1.4 m/s"
+}

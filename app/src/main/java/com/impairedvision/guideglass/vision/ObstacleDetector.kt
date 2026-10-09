@@ -83,6 +83,18 @@ class ObstacleDetector(
     var clearStreakRequired: Int = clearStreakRequired
         private set
 
+    /**
+     * Smallest box (height fraction) the looming cue will consider. Tunable because it is a frame
+     * fraction: a wider lens makes objects smaller, and an unscaled value blocks looming at the
+     * time-to-contact radius. See [ReflexScaling].
+     */
+    var minLoomHeightRatio: Float = MIN_LOOM_HEIGHT_RATIO
+        private set
+
+    /** Smallest box (area fraction) the looming cue will consider. See [minLoomHeightRatio]. */
+    var minLoomAreaRatio: Float = MIN_LOOM_AREA_RATIO
+        private set
+
     private val detector =
             ObjectDetection.getClient(
                     ObjectDetectorOptions.Builder()
@@ -113,7 +125,9 @@ class ObstacleDetector(
             nearHeightRatio: Float = this.nearHeightRatio,
             nearAreaRatio: Float = this.nearAreaRatio,
             enterStreakRequired: Int = this.enterStreakRequired,
-            clearStreakRequired: Int = this.clearStreakRequired
+            clearStreakRequired: Int = this.clearStreakRequired,
+            minLoomHeightRatio: Float = this.minLoomHeightRatio,
+            minLoomAreaRatio: Float = this.minLoomAreaRatio
     ) {
         this.centerPathMinXRatio = centerPathMinXRatio
         this.centerPathMaxXRatio = centerPathMaxXRatio
@@ -123,7 +137,20 @@ class ObstacleDetector(
         this.nearAreaRatio = nearAreaRatio
         this.enterStreakRequired = enterStreakRequired
         this.clearStreakRequired = clearStreakRequired
+        this.minLoomHeightRatio = minLoomHeightRatio
+        this.minLoomAreaRatio = minLoomAreaRatio
     }
+
+    /** Applies every frame-fraction gate at once, e.g. when the camera source changes. */
+    fun applyGates(gates: ReflexGates) =
+            applyTuning(
+                    centerPathMinXRatio = gates.centerPathMinXRatio,
+                    centerPathMaxXRatio = gates.centerPathMaxXRatio,
+                    nearHeightRatio = gates.nearHeightRatio,
+                    nearAreaRatio = gates.nearAreaRatio,
+                    minLoomHeightRatio = gates.minLoomHeightRatio,
+                    minLoomAreaRatio = gates.minLoomAreaRatio
+            )
 
     fun processFrame(bitmap: Bitmap, listener: Listener) {
         val image = InputImage.fromBitmap(bitmap, 0)
@@ -245,7 +272,7 @@ class ObstacleDetector(
     /** True if the tracked object is growing quickly or has a short estimated time-to-contact. */
     private fun isLooming(hist: ArrayDeque<TrackSample>?, currHeight: Float, currArea: Float): Boolean {
         if (hist == null || hist.size < 2) return false
-        if (currHeight < MIN_LOOM_HEIGHT_RATIO && currArea < MIN_LOOM_AREA_RATIO) return false
+        if (currHeight < minLoomHeightRatio && currArea < minLoomAreaRatio) return false
 
         val first = hist.first()
         val last = hist.last()
@@ -308,8 +335,8 @@ class ObstacleDetector(
         private const val LOOM_WINDOW_MS = 900L
         private const val TRACK_TTL_MS = 1200L
         private const val MAX_SAMPLES_PER_TRACK = 6
-        private const val MIN_LOOM_HEIGHT_RATIO = 0.16f
-        private const val MIN_LOOM_AREA_RATIO = 0.03f
+        const val MIN_LOOM_HEIGHT_RATIO = 0.16f
+        const val MIN_LOOM_AREA_RATIO = 0.03f
         private const val LOOM_GROWTH_RATE_PER_SEC = 0.6f
         private const val TTC_IMMINENT_SEC = 2.0f
 

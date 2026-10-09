@@ -50,6 +50,11 @@ import com.impairedvision.guideglass.maps.RetrofitClients
 import com.impairedvision.guideglass.tts.SpeechHelper
 import com.impairedvision.guideglass.ai.GeminiManager
 import com.impairedvision.guideglass.ai.NavContextBuilder
+import com.impairedvision.guideglass.glasses.GlassesCameraSource
+import com.impairedvision.guideglass.glasses.GlassesEvent
+import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.types.Permission
+import com.meta.wearable.dat.core.types.PermissionStatus
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -61,6 +66,10 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         private const val TAG = "VisionActivity"
         private const val THROTTLE_MS = 1500L
         private const val CAMERA_PERMISSION_CODE = 10
+
+        /** Pass [CAMERA_SOURCE_GLASSES] to use the Meta glasses camera instead of the phone. */
+        const val EXTRA_CAMERA_SOURCE = "CAMERA_SOURCE"
+        const val CAMERA_SOURCE_GLASSES = "glasses"
 
         // Reflex STOP rate-limiting: at most one urgent alert per cooldown, and only after the
         // previous obstacle truly cleared and re-armed. Prevents "STOP STOP STOP" flicker spam.
@@ -115,6 +124,11 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     private var lastAnalysisTime = 0L
     private var analysisEnabled = true
     private var combinedMode = false
+
+    /** True while the Meta glasses, rather than the phone, are the reflex's camera. */
+    private var useGlasses = false
+    private var glassesSource: GlassesCameraSource? = null
+    private var glassesPermissionResult: CompletableDeferred<Boolean>? = null
     /** Single gate for Tier-2 Gemini work (replaces legacy isProcessing + geminiInFlight). */
     private val geminiInFlight = AtomicBoolean(false)
 
@@ -162,6 +176,18 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
                     speechHelper.speak("Location permission is required for map features.")
                     Toast.makeText(this, "Location permission denied", Toast.LENGTH_LONG).show()
                 }
+            }
+
+    /** Glasses camera access is granted inside the Meta AI app, not by Android. */
+    private val glassesPermissionLauncher =
+            registerForActivityResult(Wearables.RequestPermissionContract()) { result ->
+                glassesPermissionResult?.complete(result.getOrNull() == PermissionStatus.Granted)
+            }
+
+    private val bluetoothPermissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (granted) startGlassesCamera()
+                else fallBackToPhoneCamera("Bluetooth permission was denied")
             }
 
     private val autocompleteLauncher =
@@ -263,6 +289,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         setContentView(R.layout.activity_vision)
 
         combinedMode = intent.getBooleanExtra("COMBINED_MODE", false)
+        useGlasses = intent.getStringExtra(EXTRA_CAMERA_SOURCE) == CAMERA_SOURCE_GLASSES
         speechHelper = SpeechHelper(this)
         geminiManager = GeminiManager(getString(R.string.gemini_api_key))
 
@@ -323,6 +350,8 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
         val welcomeMsg =
                 if (combinedMode) {
                     "Combined mode active. Map and vision are both running. Search for a destination to begin navigation."
+                } else if (useGlasses) {
+                    "Vision mode started. Connecting to your glasses camera."
                 } else {
                     "Vision mode started. Point camera forward."
                 }
@@ -875,6 +904,10 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     // ========================================
 
     private fun checkCameraPermissionAndStart() {
+        if (useGlasses) {
+            startGlassesCameraFlow()
+            return
+        }
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
@@ -1156,6 +1189,82 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
                 Log.e(TAG, "Geocoding failed", e)
             }
         }
+    }
+
+    // ========================================
+    //          META GLASSES CAMERA
+    // ========================================
+
+    private fun startGlassesCameraFlow() {
+        // BLUETOOTH_CONNECT only exists from API 31. Below that, Bluetooth is an install-time grant.
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+                        checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+                                PackageManager.PERMISSION_GRANTED
+        ) {
+            startGlassesCamera()
+        } else {
+            bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+    }
+
+    private fun startGlassesCamera() {
+        val source = GlassesCameraSource(this, uiScope)
+        glassesSource = source
+        source.start(
+                requestCameraPermission = ::requestGlassesCameraPermission,
+                onFrame = { bitmap, timestamp ->
+                    if (useGlasses) reflexExecutor.execute { processFrame(bitmap, timestamp) }
+                },
+                onEvent = { event -> runOnUiThread { handleGlassesEvent(event) } },
+        )
+    }
+
+    private suspend fun requestGlassesCameraPermission(): Boolean =
+            withContext(Dispatchers.Main) {
+                val result = CompletableDeferred<Boolean>()
+                glassesPermissionResult = result
+                glassesPermissionLauncher.launch(Permission.CAMERA)
+                result.await()
+            }
+
+    private fun handleGlassesEvent(event: GlassesEvent) {
+        when (event) {
+            GlassesEvent.Connecting -> updateStatusText("Connecting to glasses camera")
+            GlassesEvent.Streaming -> {
+                // The glasses lens is wider than the phone's, so every frame-fraction gate must be
+                // rescaled or warnings arrive far later. See ReflexScaling and sim_glasses.py.
+                obstacleDetector.applyGates(ReflexScaling.glasses)
+                updateStatusText("Glasses camera active")
+                speechHelper.speak("Glasses camera connected.")
+            }
+            is GlassesEvent.Unavailable -> {
+                if (event.needsRegistration) {
+                    // Opens the Meta AI app. The user approves the app there and returns through
+                    // the guideglass:// link on the launcher. The phone camera covers them meanwhile.
+                    Wearables.startRegistration(this)
+                }
+                fallBackToPhoneCamera(event.reason)
+            }
+            is GlassesEvent.Lost -> {
+                // The reflex just lost its camera mid-walk. Interrupt whatever is being said.
+                VibrationHelper.vibrateOneShot(this, 400L)
+                fallBackToPhoneCamera(event.reason, urgent = true)
+            }
+        }
+    }
+
+    /** Never leave the user walking without obstacle detection: switch to the phone camera. */
+    private fun fallBackToPhoneCamera(reason: String, urgent: Boolean = false) {
+        if (!useGlasses && glassesSource == null) return
+        glassesSource?.stop()
+        glassesSource = null
+        useGlasses = false
+        obstacleDetector.applyGates(ReflexScaling.phone)
+        Log.w(TAG, "Falling back to the phone camera: $reason")
+        val message = "Glasses camera unavailable, $reason. Switching to the phone camera."
+        if (urgent) speechHelper.speakUrgent(message) else speechHelper.speak(message)
+        updateStatusText("Phone camera (glasses unavailable)")
+        checkCameraPermissionAndStart()
     }
 
     private fun startCamera() {
@@ -1523,6 +1632,7 @@ class VisionActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() {
         super.onDestroy()
         stopInAppNavigation()
+        glassesSource?.stop()
         cameraExecutor.shutdown()
         reflexExecutor.shutdown()
         sensorManager.unregisterListener(sensorListener)
