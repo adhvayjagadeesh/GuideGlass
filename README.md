@@ -1,5 +1,39 @@
 # VisionAI
 
+> **You are on the `meta-glasses` branch.** This is work after the paper: the safety reflex now runs
+> on the Ray-Ban Meta camera instead of the phone's. The paper's system as published is on
+> [`main`](https://github.com/adhvayjagadeesh/GuideGlass). Setup, safety behavior, and known gaps are
+> in [`docs/META_GLASSES.md`](docs/META_GLASSES.md).
+
+## What this branch adds
+
+| Addition | Where |
+|---|---|
+| Glasses camera mode, a fourth launcher button, streaming through Meta's Wearables Device Access Toolkit 1.0.0 | `app/.../glasses/GlassesCameraSource.kt` |
+| Automatic switch to the phone camera if the glasses are taken off, disconnect, or overheat | `vision/VisionActivity.kt` |
+| Reflex thresholds rescaled for the glasses lens | `vision/ReflexScaling.kt` |
+| Simulation of the phone camera against the glasses camera | `paper/simulation/sim_glasses.py` |
+| Unit tests, and device tests against Meta's simulated glasses | `app/src/test/`, `app/src/androidTest/` |
+| Toolchain upgrade the toolkit requires: Kotlin 2.2, AGP 8.13, compileSdk 36, **minSdk 29** | `build.gradle.kts`, `app/build.gradle.kts` |
+
+**What the simulation found.** Every reflex threshold is a fraction of the camera frame, and the
+glasses lens is wider than the phone's, so objects look smaller.
+
+![Phone camera against glasses camera](paper/simulation/fig_glasses.png)
+
+- Plugging the glasses in with the phone's thresholds is a safety regression. The first warning for a
+  0.9 m bollard drops from 3.71 m to 2.29 m.
+- Rescaling the thresholds for the lens restores the phone's performance exactly, and the app does
+  this automatically when the glasses stream starts.
+- A wider lens does not by itself recover close hazards off to one side. The reflex's walking corridor
+  is what excludes them, so that is the setting to revisit.
+- Bluetooth delay is not yet measured. Each 100 ms of it costs 0.14 m of warning at walking pace.
+
+**Status.** Tested against Meta's simulated glasses only, not real hardware. The glasses' field of view
+is an estimate that still needs measuring.
+
+---
+
 Real-time navigation assistance for blind and low-vision (BLV) travelers, and a framework for
 evaluating aids like it before they reach real streets.
 
@@ -116,6 +150,8 @@ source file each comes from, and how to add a new decision rule to the compariso
 **Android.** Open the project in Android Studio. Copy `local.properties.example` to `local.properties`
 (it is gitignored) and fill in `GEMINI_API_KEY`, `GOOGLE_MAPS_KEY`, and `GOOGLE_DIRECTIONS_KEY`. The
 Maps key needs the Maps SDK for Android, Places API, and Directions API enabled. Then build and run.
+On this branch the app needs Android 10 or later, and the build needs JDK 21 (Android Studio's
+bundled JDK works; JDK 24 is too new).
 
 The launcher offers vision mode, navigation, and both together. Reflex tuning lives in
 `ObstacleDetector.ReflexTuning`, and the Gemini prompt in `ai/GeminiManager.kt`.
