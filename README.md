@@ -1,182 +1,149 @@
-# Guide Glass - Vision Assistance App
+# VisionAI
 
-A comprehensive Android application that combines Google Maps navigation with Gemini AI-powered scene recognition and text-to-speech guidance for visually impaired users.
+Real-time navigation assistance for blind and low-vision (BLV) travelers, and a framework for
+evaluating aids like it before they reach real streets.
 
-## Features
+This repository accompanies our paper, *VisionAI: Real-Time Multimodal Navigation Assistance for
+Blind and Low-Vision People*. It holds the Android application the paper describes, a browser client
+with the same behavior, and the simulation study behind every figure and number in the paper's
+Results.
 
-### 🔍 Vision Mode
-- Real-time camera analysis using Google Gemini AI
-- Automatic scene recognition and obstacle detection
-- Voice guidance for navigation assistance
-- Configurable analysis frequency (default: every 3 seconds)
-- Urgent alerts for immediate dangers (e.g., "STOP")
+> **Research prototype.** VisionAI has not yet been evaluated with blind or low-vision participants,
+> and it is not a mobility aid. Never use it in place of a cane, a guide dog, or orientation and
+> mobility training.
 
-### 🗺️ Navigation Mode
-- Google Maps integration with turn-by-turn directions
-- Place search with autocomplete
-- Walking directions with voice guidance
-- Real-time location tracking during navigation
-- Support for different map types (Normal, Satellite, Terrain, Hybrid)
+## The idea
 
-### 🚶 Combined Mode
-- Use Vision and Navigation together
-- Camera analysis while navigating
-- Seamless switching between features
+Today's AI scene-description tools answer questions about a photo the user chose to take. Walking
+needs something different: a system that watches continuously, speaks up on its own, and gets the
+timing right. A warning that arrives too late, an alarm about nothing, or the same alert repeated
+dozens of times can each make an aid unusable, and benchmarks that score one answer to one question
+do not directly represent any of them.
 
-## Project Structure
+The paper makes three contributions.
 
-```
-com.impairedvision.guideglass/
-├── MainActivity.kt              # Main launcher with mode selection
-├── maps/
-│   ├── MapsActivity.kt         # Google Maps navigation
-│   ├── DirectionsService.kt    # Retrofit API for directions
-│   ├── RetrofitClients.kt      # API client configuration
-│   └── PolylineDecoder.kt      # Decode route polylines
-├── vision/
-│   ├── VisionActivity.kt       # Gemini AI camera analysis
-│   └── OverlayView.kt          # Detection visualization overlay
-├── tts/
-│   └── SpeechHelper.kt         # Shared text-to-speech helper
-└── ui/theme/
-    ├── Color.kt                # Theme colors
-    ├── Theme.kt                # Material 3 theme
-    └── Type.kt                 # Typography styles
-```
+1. **A two-tier architecture.** A cloud multimodal model takes 1.5 to 3 seconds to respond, and a
+   walker covers 2 to 4 meters in that time. Urgent obstacle alerts therefore come from an on-device
+   reflex with a 100 ms budget, while the cloud model supplies richer guidance off the critical path.
+2. **An operational evaluation framework.** Seven metrics, each stated as a unit, a source of ground
+   truth, and a measurement procedure, including temporal and proactive measures that static,
+   user-initiated benchmarks do not directly capture.
+3. **A simulation study** of the reflex's decision layer against four published alternative criteria
+   on identical scenes, reporting its operating envelope, its sensitivity to tuning, and its blind spots.
 
-## Setup Instructions
+## Architecture
 
-### 1. API Keys Configuration
+![VisionAI runtime architecture](paper/simulation/fig1_architecture.png)
 
-You need to configure two API keys:
+| Tier | Runs on | Job | Built from |
+|---|---|---|---|
+| Reflex | the phone | Speak "stop" and pulse the phone for anything in the walking path, with a local veer hint | ML Kit object detection, a walking-corridor gate, size and looming cues, edge-triggered alerts |
+| Guidance | the cloud | Short spoken directions that combine the scene with the route | Gemini, given the camera frame and a structured navigation context |
+| Navigation | the phone | Routing, turn-by-turn steps, heading | Google Maps Places and Directions, GPS, compass |
 
-#### Google Maps API Key
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing one
-3. Enable these APIs:
-   - Maps SDK for Android
-   - Directions API
-   - Places API
-4. Create an API key and restrict it to your app
-5. Copy `local.properties.example` to `local.properties` (gitignored) and set:
-   - `GOOGLE_MAPS_KEY` — Maps SDK + Places (manifest)
-   - `GOOGLE_DIRECTIONS_KEY` — Directions REST API
-   - `GEMINI_API_KEY` — Gemini generative API
+An arbitration layer lets urgent alerts pre-empt everything else and drops duplicates, so the user
+hears one stream. The reflex never waits on the network.
 
-#### Gemini AI API Key
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Create an API key
-3. Add it as `GEMINI_API_KEY` in `local.properties` (injected into `BuildConfig` at compile time)
+## Evaluation framework
 
-### 2. Build Configuration
+| Metric | What it measures | Reach of existing benchmarks |
+|---|---|---|
+| Time to warning | Seconds or meters between the first alert and contact | Not directly represented |
+| False alarm rate | Urgent alerts when nothing is in the walking path | Not directly represented |
+| Inaccurate prediction rate | Hazards in the path that got no alert before contact | Partially covered |
+| Repetition rate | Spoken alerts per continuous encounter with one obstacle | Not directly represented |
+| Instruction correctness | Whether the spoken action matches a safe action for that moment | Partially covered |
+| Hallucination rate | Utterances asserting something absent from the frame | Addressed by prior work |
+| Trust and cognitive load | Ratings and interviews with BLV participants over repeated use | Partially covered |
 
-The project uses:
-- Kotlin 1.9.22
-- Jetpack Compose with Material 3
-- CameraX 1.3.1
-- Google Maps SDK 18.2.0
-- Gemini AI SDK 0.2.2
-- Retrofit 2.9.0 with Moshi
+The simulation measures the first five on our own reflex. Hallucination rate needs real model
+outputs on real scenes and trust needs people, so both are deferred to participant trials.
 
-Minimum SDK: 26 (Android 8.0)
-Target SDK: 34 (Android 14)
+## Results
 
-### 3. Permissions
+Every number here comes from simulating the decision layer, not from people. The scene model,
+sampling, and expected values are documented in [`paper/simulation/README.md`](paper/simulation/README.md).
 
-The app requires these permissions (handled in AndroidManifest.xml):
-- `INTERNET` - For API calls
-- `ACCESS_FINE_LOCATION` - For GPS navigation
-- `ACCESS_COARSE_LOCATION` - For approximate location
-- `CAMERA` - For vision mode
+**Against alternative decision rules.** Five rules on the same 16,000 hazard-free and 8,000 hazard
+scenes. The shipped rule is R5, highlighted.
 
-### 4. Building the Project
+![Five decision rules compared on four measures](paper/simulation/fig_baselines.png)
+
+- **Fewest false alarms:** 2.0 percent, 2.9 times fewer than the best alternative.
+- **Unaffected by camera tilt:** its decisions never change under an 8 degree pitch shift, where the
+  two rules that reason about the ground change on 14 and 24 percent of scenes.
+- **The trade we report rather than hide:** it misses more hazards than the two rules with no spatial
+  gate. Those catch more because they alert on anything looming anywhere in the frame, and they raise
+  13 to 15 times as many false alarms.
+
+**Warning time.** A looming cue, triggered on estimated time to contact, lifts mid-sized and small
+obstacles to a full two seconds of warning.
+
+![Distance at first alert versus obstacle height](paper/simulation/fig3_warning.png)
+
+**Alert discipline.** Walking toward a bollard, stopping, backing off, and approaching again, the
+reflex speaks exactly twice. A naive policy would speak 81 times on the same frames.
+
+![Double approach to a bollard](paper/simulation/fig4_timeline.png)
+
+## What simulation cannot show
+
+The study validates one system's decision layer against the framework. It does not validate the
+framework itself.
+
+- The system, the simulator, and the framework were built by the same authors, which is weaker
+  evidence than an independent replication.
+- Scenes are synthetic and detection is idealized, so results describe decision logic given a
+  detection, not whether the detector fires under real lighting, motion blur, and hardware.
+- Hallucination rate and trust are not measured at all.
+
+## Reproduce the results
+
+The simulation needs only Python 3 with NumPy and Matplotlib. Every random seed is fixed, and a clean
+checkout regenerates all thirteen figures and three result files byte for byte, in under ten seconds.
 
 ```bash
-# Open in Android Studio
-# File > Open > Select the GuideGlass directory
-
-# Or build from command line
-./gradlew assembleDebug
+pip install numpy matplotlib
+cd paper/simulation
+python3 sim_reflex.py && python3 sim_extra.py && python3 sim_baselines.py
 ```
 
-## Usage
+The thresholds under test are the ones the app ships with. The simulation README records which
+source file each comes from, and how to add a new decision rule to the comparison.
 
-### Main Menu
-- **Start Vision Mode**: Opens camera for AI-powered scene analysis
-- **Start Navigation**: Opens Google Maps for turn-by-turn navigation
-- **Vision + Navigation**: Combined mode with both features active
+## Run the app
 
-### Vision Mode
-- Point the camera forward
-- The AI will analyze the scene and provide voice guidance
-- Tap "Pause Analysis" to temporarily stop analysis
-- Instructions appear on screen and are spoken aloud
+**Android.** Open the project in Android Studio. Copy `local.properties.example` to `local.properties`
+(it is gitignored) and fill in `GEMINI_API_KEY`, `GOOGLE_MAPS_KEY`, and `GOOGLE_DIRECTIONS_KEY`. The
+Maps key needs the Maps SDK for Android, Places API, and Directions API enabled. Then build and run.
 
-### Navigation Mode
-- Tap the search bar to enter a destination
-- Or long-press on the map to set origin/destination manually
-- Tap "Start Navigation" when route is shown
-- Voice guidance will announce each turn
+The launcher offers vision mode, navigation, and both together. Reflex tuning lives in
+`ObstacleDetector.ReflexTuning`, and the Gemini prompt in `ai/GeminiManager.kt`.
 
-## Voice Commands Reference
+**Browser.** A port with the same tiers, thresholds, and prompt runs on a laptop webcam or a phone
+browser. See [`web/README.md`](web/README.md).
 
-### Vision Mode Responses
-- "Walk forward" - Path is clear
-- "Veer [direction] for [object]" - Obstacle ahead, adjust course
-- "STOP. [Object]. [Action]" - Immediate danger
+## Repository map
 
-### Navigation Mode
-- Route summary (distance, duration)
-- Turn-by-turn instructions
-- Arrival announcement
+| Path | Contents |
+|---|---|
+| `app/` | Android app in Kotlin. The reflex is in `vision/ObstacleDetector.kt`, the cloud tier in `ai/` |
+| `web/` | Browser client with the same three tiers |
+| `paper/simulation/` | Simulator, result files, and every figure in the paper |
+| `docs/` | Project status and planning notes |
+| `guideglass_technical_deep_dive.md` | Threading model and design history |
 
-## Customization
+## Branches
 
-### Adjust Analysis Frequency
-In `VisionActivity.kt`, modify:
-```kotlin
-private const val THROTTLE_MS = 3000L // Change to desired interval
-```
+| Branch | What it holds |
+|---|---|
+| `main` | The system and study as described in the paper |
+| [`meta-glasses`](https://github.com/adhvayjagadeesh/GuideGlass/tree/meta-glasses) | Work after the paper: running the reflex on the Ray-Ban Meta camera through Meta's Wearables Device Access Toolkit, with a simulation of how the glasses lens changes the reflex |
 
-### Modify AI Instructions
-In `VisionActivity.kt`, edit the `systemInstruction` block to change how Gemini responds.
+## Next steps
 
-### Speech Settings
-Use `SpeechHelper` methods:
-```kotlin
-speechHelper.setSpeechRate(1.2f)  // Faster speech
-speechHelper.setPitch(0.9f)       // Lower pitch
-```
-
-## Troubleshooting
-
-### Maps not loading
-- Verify Google Maps API key is correct
-- Check that Maps SDK is enabled in Cloud Console
-- Ensure the key has Android app restrictions set correctly
-
-### Camera not working
-- Grant camera permission when prompted
-- Check if another app is using the camera
-
-### No voice output
-- Check device volume
-- Ensure TTS is installed on device
-- Verify language pack is available
-
-### Gemini errors
-- Verify API key is valid
-- Check internet connection
-- Review usage quotas in Google AI Studio
-
-## License
-
-This project is for educational and accessibility purposes.
-
-## Acknowledgments
-
-- Google Maps Platform
-- Google Gemini AI
-- Android Jetpack libraries
-- Material Design 3
-# guideglass
+The plan moves from simulation to people in stages, each of which has to earn the next. First,
+structured street tests with sighted researchers. Next, trials with BLV volunteers on closed courses,
+with ethics approval and an orientation and mobility specialist present. Last, everyday routes over
+several weeks. In parallel, a small on-device model would cut the cloud tier's delay, and the camera
+moves from the phone to glasses.
